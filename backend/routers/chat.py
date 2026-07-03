@@ -5,16 +5,24 @@ from pydantic import BaseModel
 from database.connection import get_db
 from database.models import TimelineEvent, KnowledgeCard
 from services.gemini import GeminiService
+from services.cache import RedisCacheService
 
 router = APIRouter(prefix="/api/projects", tags=["chat"])
 
 gemini = GeminiService()
+cache = RedisCacheService()
 
 class ChatQuery(BaseModel):
     question: str
 
 @router.post("/{project_id}/chat")
 def chat(project_id: str, payload: ChatQuery, db: Session = Depends(get_db)):
+    # 1. Check Redis Assistant Cache first
+    cached_response = cache.get_cached_chat(project_id, payload.question)
+    if cached_response:
+        print(f"Serving chatbot response from Redis Cache for key: {payload.question}")
+        return {"answer": cached_response}
+
     card = db.query(KnowledgeCard).filter(KnowledgeCard.project_id == project_id).first()
     timeline = db.query(TimelineEvent).filter(TimelineEvent.project_id == project_id).limit(5).all()
     
@@ -29,4 +37,8 @@ def chat(project_id: str, payload: ChatQuery, db: Session = Depends(get_db)):
     timeline_list = [f"{evt.title}: {evt.description}" for evt in timeline]
     
     response = gemini.assistant_chat(payload.question, card_dict, timeline_list)
+    
+    # 2. Store response in Redis Assistant Cache
+    cache.set_cached_chat(project_id, payload.question, response)
+    
     return {"answer": response}

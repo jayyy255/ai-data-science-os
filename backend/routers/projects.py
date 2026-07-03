@@ -7,11 +7,13 @@ from database.models import Project, DecisionMemory, TimelineEvent, KnowledgeCar
 from services.dataset import DatasetService
 from services.gemini import GeminiService
 from services.minio_client import MinIOClient
+from services.cache import RedisCacheService
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 gemini = GeminiService()
 minio = MinIOClient()
+cache = RedisCacheService()
 
 class DecisionOverride(BaseModel):
     feature_name: str
@@ -78,6 +80,9 @@ async def create_project(
     db.commit()
     db.refresh(db_project)
     
+    # Cache EDA profile in Redis Cache
+    cache.set_cached_eda(project_id, profile)
+    
     return {
         "project": db_project,
         "s3_path": s3_path,
@@ -94,6 +99,9 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
+    # Fetch cached EDA profile from Redis
+    cached_eda = cache.get_cached_eda(project_id)
+    
     decisions = db.query(DecisionMemory).filter(DecisionMemory.project_id == project_id).all()
     timeline = db.query(TimelineEvent).filter(TimelineEvent.project_id == project_id).order_by(TimelineEvent.timestamp.desc()).all()
     card = db.query(KnowledgeCard).filter(KnowledgeCard.project_id == project_id).first()
@@ -102,7 +110,8 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
         "project": project,
         "decisions": decisions,
         "timeline": timeline,
-        "knowledge_card": card
+        "knowledge_card": card,
+        "cached_eda": cached_eda
     }
 
 @router.post("/{project_id}/override")
