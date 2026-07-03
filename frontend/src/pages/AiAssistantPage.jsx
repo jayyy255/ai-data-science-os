@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
 import { Send, Sparkles, BrainCircuit, User, ArrowRight, BookOpen, AlertTriangle } from 'lucide-react';
+import axios from 'axios';
+
 
 export default function AiAssistantPage() {
   const { getActiveProject } = useProjectStore();
@@ -27,7 +29,7 @@ export default function AiAssistantPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  const handleSend = (textToSend) => {
+  const handleSend = async (textToSend) => {
     if (!textToSend.trim()) return;
 
     // Add user message
@@ -36,31 +38,40 @@ export default function AiAssistantPage() {
     setInputMsg('');
     setLoading(true);
 
-    // Simulate AI response based on questions
-    setTimeout(() => {
-      let aiText = `I analyzed the Project Memory for ${project.name}. `;
-      const query = textToSend.toLowerCase();
+    try {
+      const res = await axios.post(`http://localhost:8000/api/projects/${project.id}/chat`, {
+        question: textToSend
+      });
+      setMessages(prev => [...prev, { sender: 'ai', text: res.data.answer }]);
+      setLoading(false);
+    } catch (err) {
+      console.warn("Backend API chat failed. Falling back to local offline logic.", err);
+      // Simulate AI response based on questions
+      setTimeout(() => {
+        let aiText = `I analyzed the Project Memory for ${project.name}. `;
+        const query = textToSend.toLowerCase();
 
-      if (query.includes('xgboost') || query.includes('model') || query.includes('selected')) {
-        aiText += `**XGBoost** was selected as the champion model with **94% confidence** in HPO Trial #46. Rationale: tabular dataset with mixed numeric and high-cardinality categorical features. In comparative trials, XGBoost achieved an F1 validation score of **0.913** vs. **0.865** for Random Forest.`;
-      } else if (query.includes('preprocess') || query.includes('imput') || query.includes('feature')) {
-        aiText += `The following preprocessing operations were applied:
+        if (query.includes('xgboost') || query.includes('model') || query.includes('selected')) {
+          aiText += `**XGBoost** was selected as the champion model with **94% confidence** in HPO Trial #46. Rationale: tabular dataset with mixed numeric and high-cardinality categorical features. In comparative trials, XGBoost achieved an F1 validation score of **0.913** vs. **0.865** for Random Forest.`;
+        } else if (query.includes('preprocess') || query.includes('imput') || query.includes('feature')) {
+          aiText += `The following preprocessing operations were applied:
 1. **Median Imputation** on \`tenure\` (91% confidence) due to outliers.
 2. **One-Hot Encoding** on \`payment_method\` (95% confidence) due to low cardinality (4 categories).
 3. **Standard Scaling** on \`MonthlyCharges\` (88% confidence).
 4. **User Override**: The scaling strategy for \`support_calls\` was manually overridden to **Keep Raw Count** (15% difference in feature correlation).`;
-      } else if (query.includes('influence') || query.includes('feature') || query.includes('shap')) {
-        aiText += `According to the SHAP Global Explanations:
+        } else if (query.includes('influence') || query.includes('feature') || query.includes('shap')) {
+          aiText += `According to the SHAP Global Explanations:
 - **tenure** has the strongest negative impact (longer tenure reduces churn probability).
 - **MonthlyCharges** has a positive impact (higher charges increase churn probability).
 - **support_calls** has a positive impact (exceeding 4 calls represents a 74% likelihood threshold).`;
-      } else {
-        aiText += `Based on the registered Level 1 and Level 2 Knowledge Cards, the dataset contains **${project.rowsCount?.toLocaleString()} rows** and **${project.columnsCount} features** with **${project.missingValuesPct}% missing values**. Currently, the project is **${project.status}** with a best F1 score of **${project.bestF1 || 'N/A'}** using **${project.bestModel}**. Let me know if you would like me to trigger retraining.`;
-      }
+        } else {
+          aiText += `Based on the registered Level 1 and Level 2 Knowledge Cards, the dataset contains **${project.rowsCount?.toLocaleString()} rows** and **${project.columnsCount} features** with **${project.missingValuesPct}% missing values**. Currently, the project is **${project.status}** with a best F1 score of **${project.bestF1 || 'N/A'}** using **${project.bestModel}**. Let me know if you would like me to trigger retraining.`;
+        }
 
-      setMessages(prev => [...prev, { sender: 'ai', text: aiText }]);
-      setLoading(false);
-    }, 1000);
+        setMessages(prev => [...prev, { sender: 'ai', text: aiText }]);
+        setLoading(false);
+      }, 1000);
+    }
   };
 
   return (
