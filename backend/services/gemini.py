@@ -1,6 +1,6 @@
 import os
 import json
-import google.generativeai as genai
+from google import genai
 
 # Fallback mock answers for robust local-first execution without active API keys
 MOCK_UNDERSTANDING = {
@@ -16,7 +16,7 @@ class GeminiService:
         # Configure SDK key if available in env
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
-            genai.configure(api_key=api_key)
+            self.client = genai.Client(api_key=api_key)
             self.client_enabled = True
         else:
             self.client_enabled = False
@@ -29,7 +29,6 @@ class GeminiService:
             return MOCK_UNDERSTANDING
 
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
             prompt = f"""
             You are an expert AI Data Science Assistant.
             Analyze the following project setup details:
@@ -46,7 +45,10 @@ class GeminiService:
             
             Do not wrap in markdown syntax. Return raw JSON string.
             """
-            response = model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
             return json.loads(response.text.strip())
         except Exception as e:
             print(f"Gemini API Error in understand_project: {e}")
@@ -64,7 +66,6 @@ class GeminiService:
             return f"Understood query. Current active model is {knowledge_card.get('best_model', 'None')} with validation score of {knowledge_card.get('best_f1', 'N/A')}."
 
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
             context = f"""
             You are a project-aware AI Data Science Companion.
             Here is the active project's Knowledge Card context:
@@ -76,7 +77,10 @@ class GeminiService:
             Answer the user's question accurately using ONLY this project context.
             User Question: {question}
             """
-            response = model.generate_content(context)
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=context
+            )
             return response.text.strip()
         except Exception as e:
             return f"Error interacting with Gemini API: {e}"

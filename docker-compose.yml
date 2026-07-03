@@ -1,6 +1,38 @@
 version: '3.8'
 
 services:
+  # Python FastAPI Application Server
+  backend:
+    build:
+      context: ./backend
+    container_name: aidso-backend
+    depends_on:
+      - postgres
+      - redis
+      - minio
+      - kafka
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/aidso
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - KAFKA_BROKERS=kafka:29092
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - ./backend:/app
+
+  # React Frontend Client served via Nginx
+  frontend:
+    build:
+      context: ./frontend
+    container_name: aidso-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
   # Database Storage
   postgres:
     image: postgres:15-alpine

@@ -6,11 +6,6 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, mean_squared_error
-import xgboost as xgb
-import lightgbm as lgb
-import optuna
-import shap
-import mlflow
 
 class TrainingWorker:
     def __init__(self, db_session_maker=None):
@@ -43,6 +38,12 @@ class TrainingWorker:
         """
         Runs the full Optuna HPO + MLflow + SHAP calculations pipeline.
         """
+        import xgboost as xgb
+        import lightgbm as lgb
+        import optuna
+        import shap
+        import mlflow
+
         print(f"Starting pipeline training job for project: {project_id}")
         
         # 1. Initialize MLflow tracking
