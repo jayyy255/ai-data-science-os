@@ -1,0 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-brand-primary: #7c3aed;
+  --color-brand-primary-hover: #6d28d9;
+  --color-brand-dark-bg: #09090b;
+  --color-brand-dark-surface: #18181b;
+  --color-brand-dark-card: #27272a;
+  --color-brand-dark-border: #3f3f46;
+  
+  --font-display: "Outfit", "Inter", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-brand-dark-bg);
+    color: #f4f4f5; /* zinc-100 */
+    font-family: var(--font-body);
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+  }
+}
+
+/* Custom scrollbar to look sleek and developer-centric */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #09090b;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
