@@ -65,5 +65,10 @@ class KnowledgeCard(Base):
     models_tested_count = Column(Integer, default=0)
     top_features = Column(JSON, nullable=True)  # List of strings
     status = Column(String, nullable=False)
+    numerical_count = Column(Integer, default=0)
+    categorical_count = Column(Integer, default=0)
+    quality_health_json = Column(JSON, nullable=True)
+    shap_global_json = Column(JSON, nullable=True)
+    shap_local_json = Column(JSON, nullable=True)
 
     project = relationship("Project", back_populates="knowledge_cards")
