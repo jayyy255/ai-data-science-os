@@ -70,3 +70,30 @@ class MinIOClient:
         with open(filepath, 'wb') as f:
             f.write(content)
         return f"file://{os.path.abspath(filepath)}"
+
+    def download_file(self, path: str) -> bytes:
+        """
+        Downloads file content from S3 or local directory.
+        """
+        if path.startswith("s3://"):
+            try:
+                bucket_and_key = path[5:]
+                bucket, key = bucket_and_key.split("/", 1)
+                response = self.s3.get_object(Bucket=bucket, Key=key)
+                return response['Body'].read()
+            except Exception as e:
+                print(f"S3 download failed: {e}")
+                # Fallback to try local file with same key filename
+                filename = path.split("/")[-1]
+                filepath = os.path.join(self.local_fallback_dir, filename)
+                if os.path.exists(filepath):
+                    with open(filepath, 'rb') as f:
+                        return f.read()
+                raise e
+        elif path.startswith("file://"):
+            filepath = path[7:]
+            with open(filepath, 'rb') as f:
+                return f.read()
+        else:
+            with open(path, 'rb') as f:
+                return f.read()

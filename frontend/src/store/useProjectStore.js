@@ -167,7 +167,14 @@ const defaultDemandProject = {
 export const useProjectStore = create((set, get) => ({
   projects: [defaultChurnProject, defaultDemandProject],
   activeProjectId: 'churn-prediction',
-  currentUser: { email: 'datascientist@company.ai', token: 'mock-jwt-token-123' },
+  currentUser: (() => {
+    try {
+      const stored = localStorage.getItem('aidso-user');
+      return stored ? JSON.parse(stored) : null;
+    } catch (e) {
+      return null;
+    }
+  })(),
   
   // Environment Connections state
   connections: {
@@ -185,13 +192,64 @@ export const useProjectStore = create((set, get) => ({
     return state.projects.find(p => p.id === state.activeProjectId) || defaultChurnProject;
   },
 
-  setActiveProjectId: (id) => set({ activeProjectId: id }),
+  setActiveProjectId: (id) => {
+    set({ activeProjectId: id });
+    get().fetchProjectDetails(id);
+  },
 
   // Auth actions
-  login: (email, password) => {
-    set({ currentUser: { email, token: 'mock-jwt-token-new' } });
+  login: async (identity, password) => {
+    try {
+      const res = await axios.post(`${API_BASE}/auth/login`, { identity, password });
+      const { user, accessToken, refreshToken } = res.data;
+      const userData = { ...user, token: accessToken, refreshToken };
+      localStorage.setItem('aidso-user', JSON.stringify(userData));
+      set({ currentUser: userData });
+      return { success: true };
+    } catch (err) {
+      const detail = err.response?.data?.detail || "Authentication failed";
+      return { success: false, error: detail };
+    }
   },
-  logout: () => set({ currentUser: null }),
+  signup: async (fullName, username, email, password) => {
+    try {
+      const res = await axios.post(`${API_BASE}/auth/signup`, {
+        full_name: fullName,
+        username,
+        email,
+        password
+      });
+      const { user, accessToken, refreshToken } = res.data;
+      const userData = { ...user, token: accessToken, refreshToken };
+      localStorage.setItem('aidso-user', JSON.stringify(userData));
+      set({ currentUser: userData });
+      return { success: true };
+    } catch (err) {
+      const detail = err.response?.data?.detail || "Registration failed";
+      return { success: false, error: detail };
+    }
+  },
+  logout: async () => {
+    const user = get().currentUser;
+    if (user && user.refreshToken) {
+      try {
+        await axios.post(`${API_BASE}/auth/logout`, { refresh_token: user.refreshToken });
+      } catch (err) {
+        console.warn("Failed to invalidate session token on backend:", err);
+      }
+    }
+    localStorage.removeItem('aidso-user');
+    set({ currentUser: null });
+  },
+  forgotPassword: async (email) => {
+    try {
+      const res = await axios.post(`${API_BASE}/auth/forgot-password`, { email });
+      return { success: true, message: res.data.message };
+    } catch (err) {
+      const detail = err.response?.data?.detail || "Failed to reset password";
+      return { success: false, error: detail };
+    }
+  },
   
   // Settings actions
   updateConnections: (newConnections) => set((state) => ({
@@ -237,8 +295,84 @@ export const useProjectStore = create((set, get) => ({
       }));
       
       set({ projects: apiProjects.length > 0 ? apiProjects : get().projects });
+
+      // Sync active project details if it's in the list
+      const activeId = get().activeProjectId;
+      if (apiProjects.some(p => p.id === activeId)) {
+        get().fetchProjectDetails(activeId);
+      }
     } catch (err) {
       console.warn("Backend API not reachable. Using mock projects local storage fallback.", err);
+    }
+  },
+
+  // Fetch full details of a specific project from database
+  fetchProjectDetails: async (projectId) => {
+    try {
+      const res = await axios.get(`${API_BASE}/projects/${projectId}`);
+      const { project, decisions, timeline, knowledge_card, cached_eda } = res.data;
+      
+      set((state) => ({
+        projects: state.projects.map(p => {
+          if (p.id !== projectId) return p;
+          
+          // Map DB timeline to frontend timeline
+          const mappedTimeline = timeline ? timeline.map(t => {
+            const isoStr = t.timestamp.endsWith('Z') || t.timestamp.includes('+') ? t.timestamp : t.timestamp + 'Z';
+            return {
+              time: new Date(isoStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              title: t.title,
+              desc: t.description,
+              type: t.event_type
+            };
+          }) : p.timeline;
+
+          // Map decisions
+          const mappedDecisions = decisions ? decisions.map(d => ({
+            feature: d.feature_name,
+            decision: d.decision,
+            reason: d.reason,
+            confidence: d.confidence,
+            overrideActive: d.override_active,
+            userChoice: d.user_choice
+          })) : p.featureEngineeringDecisions;
+
+          return {
+            ...p,
+            status: project.status || p.status,
+            problemType: project.problem_type || p.problemType,
+            description: project.description || p.description,
+            timeline: mappedTimeline,
+            featureEngineeringDecisions: mappedDecisions,
+            bestModel: knowledge_card?.best_model || p.bestModel,
+            bestF1: knowledge_card?.best_f1 || p.bestF1,
+            bestAccuracy: knowledge_card?.best_accuracy || p.bestAccuracy,
+            rowsCount: knowledge_card?.rows_count || p.rowsCount,
+            columnsCount: knowledge_card?.columns_count || p.columnsCount,
+            missingValuesPct: knowledge_card?.missing_values_pct || p.missingValuesPct,
+            balancingMethod: knowledge_card?.balancing_method || p.balancingMethod,
+            modelsTestedCount: knowledge_card?.models_tested_count || p.modelsTestedCount,
+            topFeatures: knowledge_card?.top_features || p.topFeatures,
+            modelPath: knowledge_card?.model_path || p.modelPath,
+            modelsComparison: knowledge_card?.models_comparison_json || p.modelsComparison,
+            
+            // Map cached eda
+            qualityHealth: cached_eda?.quality_health || p.qualityHealth,
+            features: cached_eda?.features || p.features,
+            classDistribution: cached_eda?.class_distribution || p.classDistribution,
+            correlations: cached_eda?.correlations || p.correlations,
+            distributions: cached_eda?.distributions || p.distributions,
+            structure: cached_eda ? {
+              numerical: cached_eda.numerical_count || 0,
+              categorical: cached_eda.categorical_count || 0,
+              datetime: 0,
+              text: 0
+            } : p.structure
+          };
+        })
+      }));
+    } catch (err) {
+      console.warn("Could not fetch details for project " + projectId, err);
     }
   },
 
@@ -317,6 +451,9 @@ export const useProjectStore = create((set, get) => ({
           };
         })
       }));
+
+      // Fetch the real populated database details (such as Gemini's understanding events)
+      await get().fetchProjectDetails(localId);
     } catch (err) {
       console.warn("Backend API not reachable. Keeping local mock project storage fallback.", err);
     }
@@ -370,6 +507,7 @@ export const useProjectStore = create((set, get) => ({
         feature_name: featureName,
         user_choice: userChoice
       });
+      await get().fetchProjectDetails(projectId);
     } catch (err) {
       console.warn("Backend API not reachable. Kept local override.", err);
     }
@@ -398,47 +536,19 @@ export const useProjectStore = create((set, get) => ({
 
     try {
       await axios.post(`${API_BASE}/projects/${projectId}/train`);
+      await get().fetchProjectDetails(projectId);
       
-      setTimeout(async () => {
+      const pollInterval = setInterval(async () => {
         try {
-          const res = await axios.get(`${API_BASE}/projects/${projectId}`);
-          const card = res.data.knowledge_card;
-          
-          if (card && card.best_model !== 'None') {
-            set((state) => ({
-              projects: state.projects.map(p => {
-                if (p.id !== projectId) return p;
-                return {
-                  ...p,
-                  status: 'Ready for Deployment',
-                  bestModel: card.best_model,
-                  bestF1: card.best_f1,
-                  bestAccuracy: card.best_accuracy || 0.892,
-                  modelsTestedCount: card.models_tested_count || 5,
-                  topFeatures: card.top_features || ['tenure', 'MonthlyCharges'],
-                  shapGlobal: [
-                    { feature: 'tenure', shap: -0.42, type: 'Negative impact' },
-                    { feature: 'MonthlyCharges', shap: 0.35, type: 'Positive impact' },
-                    { feature: 'support_calls', shap: 0.28, type: 'Positive impact' }
-                  ],
-                  shapLocal: {
-                    customerId: 'US-8594-QD',
-                    probability: 0.762,
-                    risk: 'High Risk',
-                    drivers: [
-                      { feature: 'support_calls', value: '5 calls', impact: '+25.4%' },
-                      { feature: 'MonthlyCharges', value: '$85.00', impact: '+15.2%' },
-                      { feature: 'tenure', value: '3 months', impact: '+10.6%' }
-                    ]
-                  }
-                };
-              })
-            }));
+          await get().fetchProjectDetails(projectId);
+          const activeProj = get().projects.find(p => p.id === projectId);
+          if (activeProj && activeProj.status !== 'Training') {
+            clearInterval(pollInterval);
           }
         } catch (e) {
           console.warn("Poll check error", e);
         }
-      }, 5000);
+      }, 3000);
 
     } catch (err) {
       console.warn("Backend API not reachable. Falling back to local training simulation.", err);

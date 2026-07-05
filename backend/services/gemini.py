@@ -46,7 +46,7 @@ class GeminiService:
             Do not wrap in markdown syntax. Return raw JSON string.
             """
             response = self.client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-1.5-flash',
                 contents=prompt
             )
             return json.loads(response.text.strip())
@@ -78,7 +78,7 @@ class GeminiService:
             User Question: {question}
             """
             response = self.client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-1.5-flash',
                 contents=context
             )
             return response.text.strip()

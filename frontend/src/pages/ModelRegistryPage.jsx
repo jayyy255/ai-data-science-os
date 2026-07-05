@@ -1,48 +1,109 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
-import { Archive, ArrowUp, ArrowDown, Download, ExternalLink, HardDrive } from 'lucide-react';
+import { Archive, ArrowUp, ArrowDown, Download, ExternalLink, HardDrive, RefreshCw } from 'lucide-react';
 
 export default function ModelRegistryPage() {
-  const { getActiveProject } = useProjectStore();
+  const { getActiveProject, fetchProjectDetails } = useProjectStore();
   const project = getActiveProject();
 
-  // Mock registry versions
-  const registryVersions = [
-    {
-      version: 'v3',
-      algorithm: 'XGBoost',
-      status: 'Production',
-      f1: 0.913,
-      path: 's3://models/customer-churn/v3.bin',
-      created: '2 hours ago',
-      metrics: { accuracy: '89.2%', logloss: '0.23' }
-    },
-    {
-      version: 'v4',
-      algorithm: 'LightGBM',
-      status: 'Staging',
-      f1: 0.902,
-      path: 's3://models/customer-churn/v4.bin',
-      created: '1 day ago',
-      metrics: { accuracy: '88.5%', logloss: '0.26' }
-    },
-    {
-      version: 'v2',
-      algorithm: 'Random Forest',
-      status: 'Archived',
-      f1: 0.865,
-      path: 's3://models/customer-churn/v2.bin',
-      created: '1 week ago',
-      metrics: { accuracy: '85.4%', logloss: '0.34' }
+  const isTraining = project.status === 'Training';
+
+  // Poll project details in the background if actively training, to update registry model states in real-time
+  useEffect(() => {
+    if (isTraining) {
+      const interval = setInterval(() => {
+        fetchProjectDetails(project.id);
+      }, 3000);
+      return () => clearInterval(interval);
     }
-  ];
+  }, [isTraining, project.id, fetchProjectDetails]);
+
+  const models = project.modelsComparison || {};
+  const hasModel = Object.keys(models).some(k => models[k].status === 'Trained');
+
+  const registryVersions = [];
+  
+  if (hasModel || isTraining) {
+    Object.keys(models).forEach((modelName, index) => {
+      const modelData = models[modelName];
+      // Display models that are either Training or Trained
+      if (modelData.status !== 'Idle') {
+        const isChamp = project.bestModel === modelName;
+        registryVersions.push({
+          version: `v${index + 1}`,
+          algorithm: modelName,
+          status: modelData.status === 'Trained' 
+            ? (isChamp ? 'Production' : 'Staging') 
+            : 'Training',
+          metricVal: modelData.metric !== null ? modelData.metric.toFixed(4) : 'Pending',
+          path: modelData.status === 'Trained'
+            ? (isChamp && project.modelPath ? project.modelPath : `s3://aidso-runs/models/${project.id}/${modelName.toLowerCase().replace(" ", "-")}.pkl`)
+            : 'Generating...',
+          created: modelData.status === 'Trained' ? 'Trained' : 'In HPO...',
+          metrics: {
+            accuracy: modelData.metric ? `${(modelData.metric * 100).toFixed(1)}%` : 'N/A',
+            logloss: 'N/A'
+          }
+        });
+      }
+    });
+  }
+
+  // Fallback to static mock list if no models have been touched yet
+  if (registryVersions.length === 0) {
+    registryVersions.push(
+      {
+        version: 'v3',
+        algorithm: 'XGBoost',
+        status: 'Production',
+        metricVal: '0.9130',
+        path: 's3://models/customer-churn/v3.bin',
+        created: '2 hours ago',
+        metrics: { accuracy: '89.2%', logloss: '0.23' }
+      },
+      {
+        version: 'v4',
+        algorithm: 'LightGBM',
+        status: 'Staging',
+        metricVal: '0.9020',
+        path: 's3://models/customer-churn/v4.bin',
+        created: '1 day ago',
+        metrics: { accuracy: '88.5%', logloss: '0.26' }
+      }
+    );
+  }
+
+  const handleDownload = (reg) => {
+    if (reg.status !== 'Training') {
+      window.open(`http://localhost:8000/api/projects/${project.id}/download-model`, '_blank');
+    } else {
+      alert('This model is currently training.');
+    }
+  };
+
+  const handleOpenMLflow = () => {
+    window.open('http://localhost:5000', '_blank');
+  };
+
+  const getMetricHeader = () => {
+    return project.problemType === 'classification' ? 'F1 Validation' : 'MSE Validation';
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-12">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-display font-bold text-white tracking-tight">Model Registry</h1>
-        <p className="text-sm text-zinc-400">Manage trained binaries, MLflow runs, and production deployment targets.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-display font-bold text-white tracking-tight">Model Registry</h1>
+          <p className="text-sm text-zinc-400">Manage trained binaries, MLflow runs, and production deployment targets.</p>
+        </div>
+
+        {isTraining && (
+          <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 px-4 py-2 rounded-xl text-sm font-semibold animate-pulse">
+            <RefreshCw className="w-4 h-4 animate-spin" />
+            Parallel HPO Runs Logging...
+          </div>
+        )}
       </div>
 
       {/* Deployment summary widgets */}
@@ -54,8 +115,14 @@ export default function ModelRegistryPage() {
           </div>
           <div>
             <span className="text-[10px] text-zinc-500 font-mono uppercase block">Active Production Champion</span>
-            <h4 className="text-lg font-bold text-zinc-100 mt-1">v3 (XGBoost Classifier)</h4>
-            <p className="text-xs text-zinc-500 mt-1 font-mono">F1-Score: 0.913 \| Logged: 2 hours ago</p>
+            <h4 className="text-lg font-bold text-zinc-100 mt-1">
+              {hasModel && project.status === 'Ready for Deployment' 
+                ? `v1 (${project.bestModel})` 
+                : 'v3 (XGBoost Classifier)'}
+            </h4>
+            <p className="text-xs text-zinc-500 mt-1 font-mono">
+              Validation Metric: {hasModel && project.status === 'Ready for Deployment' ? project.bestF1?.toFixed(4) : '0.9130'} | Logged: recently
+            </p>
           </div>
         </div>
 
@@ -65,8 +132,14 @@ export default function ModelRegistryPage() {
           </div>
           <div>
             <span className="text-[10px] text-zinc-500 font-mono uppercase block">Staging Candidate</span>
-            <h4 className="text-lg font-bold text-zinc-100 mt-1">v4 (LightGBM Classifier)</h4>
-            <p className="text-xs text-zinc-500 mt-1 font-mono">F1-Score: 0.902 \| Logged: 1 day ago</p>
+            <h4 className="text-lg font-bold text-zinc-100 mt-1">
+              {hasModel && project.status !== 'Ready for Deployment'
+                ? `v1 (${project.bestModel})` 
+                : 'v4 (LightGBM Classifier)'}
+            </h4>
+            <p className="text-xs text-zinc-500 mt-1 font-mono">
+              Validation Metric: {hasModel && project.status !== 'Ready for Deployment' ? project.bestF1?.toFixed(4) : '0.9020'} | Logged: recently
+            </p>
           </div>
         </div>
 
@@ -81,7 +154,7 @@ export default function ModelRegistryPage() {
                 <th className="p-4">Model Version</th>
                 <th className="p-4">Algorithm</th>
                 <th className="p-4">Deployment Status</th>
-                <th className="p-4 text-center">F1 Validation</th>
+                <th className="p-4 text-center">{getMetricHeader()}</th>
                 <th className="p-4 text-center">Accuracy</th>
                 <th className="p-4">MinIO S3 Binary Storage</th>
                 <th className="p-4 text-right">Actions</th>
@@ -91,6 +164,7 @@ export default function ModelRegistryPage() {
               {registryVersions.map((reg, idx) => {
                 const isProduction = reg.status === 'Production';
                 const isStaging = reg.status === 'Staging';
+                const isModelTraining = reg.status === 'Training';
                 return (
                   <tr key={idx} className="hover:bg-brand-dark-card/40 transition-colors">
                     <td className="p-4 font-semibold text-zinc-100 font-mono">{reg.version}</td>
@@ -101,17 +175,20 @@ export default function ModelRegistryPage() {
                           ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
                           : isStaging 
                             ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
-                            : 'bg-zinc-800 text-zinc-500 border border-brand-dark-border'
+                            : isModelTraining
+                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
+                              : 'bg-zinc-800 text-zinc-500 border border-brand-dark-border'
                       }`}>
+                        {isModelTraining && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                         {reg.status}
                       </span>
                     </td>
-                    <td className="p-4 text-center font-mono font-bold text-violet-300">{reg.f1}</td>
+                    <td className="p-4 text-center font-mono font-bold text-violet-300">{reg.metricVal}</td>
                     <td className="p-4 text-center font-mono text-zinc-400">{reg.metrics.accuracy}</td>
                     <td className="p-4 font-mono text-xs text-zinc-500">
                       <div className="flex items-center gap-1.5">
                         <HardDrive className="w-3.5 h-3.5 text-zinc-600" />
-                        <span className="truncate max-w-[160px]">{reg.path}</span>
+                        <span className="truncate max-w-[180px]" title={reg.path}>{reg.path}</span>
                       </div>
                     </td>
                     <td className="p-4 text-right">
@@ -133,20 +210,17 @@ export default function ModelRegistryPage() {
                           </button>
                         )}
                         <button
-                          onClick={() => {
-                            alert(`Downloading Model Binary: ${reg.version}`);
-                          }}
-                          className="bg-zinc-800 hover:bg-zinc-700 p-1.5 rounded-lg text-zinc-400 border border-brand-dark-border hover:text-zinc-200 transition-all cursor-pointer"
-                          title="Download .bin from MinIO"
+                          onClick={() => handleDownload(reg)}
+                          disabled={isModelTraining}
+                          className="bg-zinc-800 hover:bg-zinc-700 p-1.5 rounded-lg text-zinc-400 border border-brand-dark-border hover:text-zinc-200 transition-all cursor-pointer disabled:opacity-55"
+                          title="Download trained model binary"
                         >
                           <Download className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => {
-                            alert(`Launching MLflow Run UI`);
-                          }}
+                          onClick={handleOpenMLflow}
                           className="bg-zinc-800 hover:bg-zinc-700 p-1.5 rounded-lg text-zinc-400 border border-brand-dark-border hover:text-zinc-200 transition-all cursor-pointer"
-                          title="View MLflow Logs"
+                          title="View run inside MLflow"
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
                         </button>

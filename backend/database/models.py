@@ -13,13 +13,14 @@ class Project(Base):
     problem_type = Column(String, nullable=False)  # classification, regression
     description = Column(String, nullable=True)
     status = Column(String, default='Created')  # Created, EDA, Preprocessed, Training, Ready
+    dataset_path = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     decisions = relationship("DecisionMemory", back_populates="project", cascade="all, delete-orphan")
     timeline_events = relationship("TimelineEvent", back_populates="project", cascade="all, delete-orphan")
-    knowledge_cards = relationship("KnowledgeCard", back_populates="project", cascade="all, delete-orphan")
+    knowledge_card = relationship("KnowledgeCard", back_populates="project", uselist=False, cascade="all, delete-orphan")
 
 
 class DecisionMemory(Base):
@@ -70,5 +71,46 @@ class KnowledgeCard(Base):
     quality_health_json = Column(JSON, nullable=True)
     shap_global_json = Column(JSON, nullable=True)
     shap_local_json = Column(JSON, nullable=True)
+    model_path = Column(String, nullable=True)
+    models_comparison_json = Column(JSON, nullable=True)
 
-    project = relationship("Project", back_populates="knowledge_cards")
+    project = relationship("Project", back_populates="knowledge_card")
+
+
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    full_name = Column(String, nullable=False)
+    username = Column(String, unique=True, nullable=False, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+
+
+class UserSession(Base):
+    __tablename__ = 'user_sessions'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, ForeignKey('users.username', ondelete='CASCADE'), nullable=False, index=True)
+    refresh_token = Column(String, unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+
+    user = relationship("User", back_populates="sessions")
+
+
+class TrainingJob(Base):
+    __tablename__ = 'training_jobs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String, ForeignKey('projects.id', ondelete='CASCADE'), nullable=False, index=True)
+    status = Column(String, nullable=False, default='queued') # queued, running, completed, failed
+    model_type = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    artifact_path = Column(String, nullable=True)
+    metrics_json = Column(JSON, nullable=True)
+
+    project = relationship("Project")

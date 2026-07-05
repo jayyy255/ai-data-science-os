@@ -17,7 +17,6 @@ import KnowledgeCardPage from './pages/KnowledgeCardPage';
 import AiAssistantPage from './pages/AiAssistantPage';
 import ModelRegistryPage from './pages/ModelRegistryPage';
 import MonitoringPage from './pages/MonitoringPage';
-import SettingsPage from './pages/SettingsPage';
 
 // Guard component to protect pages requiring active login sessions
 function PrivateRoute({ children }) {
@@ -52,7 +51,6 @@ export default function App() {
                   <Route path="/assistant" element={<AiAssistantPage />} />
                   <Route path="/registry" element={<ModelRegistryPage />} />
                   <Route path="/monitoring" element={<MonitoringPage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
                 </Routes>
               </Layout>
             </PrivateRoute>

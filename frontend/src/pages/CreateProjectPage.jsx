@@ -7,9 +7,9 @@ export default function CreateProjectPage() {
   const navigate = useNavigate();
   const createProject = useProjectStore((state) => state.createProject);
 
-  const [projectName, setProjectName] = useState('Customer Churn Prediction');
-  const [targetVariable, setTargetVariable] = useState('churn');
-  const [description, setDescription] = useState('Predict customer churn and identify key factors influencing customer attrition to drive retention programs.');
+  const [projectName, setProjectName] = useState('');
+  const [targetVariable, setTargetVariable] = useState('');
+  const [description, setDescription] = useState('');
   const [file, setFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -116,7 +116,6 @@ export default function CreateProjectPage() {
             rows={3}
             className="w-full bg-brand-dark-bg/60 border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2 px-3 rounded-xl text-sm font-medium transition-all leading-relaxed"
             placeholder="Describe the target outcomes and goals..."
-            required
           />
         </div>
 

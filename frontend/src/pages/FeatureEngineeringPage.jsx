@@ -3,7 +3,7 @@ import { useProjectStore } from '../store/useProjectStore';
 import { Sliders, HelpCircle, Save, Sparkles, AlertTriangle, ShieldCheck, Check } from 'lucide-react';
 
 export default function FeatureEngineeringPage() {
-  const { getActiveProject, applyOverride } = useProjectStore();
+  const { getActiveProject, applyOverride, triggerTraining } = useProjectStore();
   const project = getActiveProject();
 
   const [saving, setSaving] = useState(false);
@@ -24,6 +24,7 @@ export default function FeatureEngineeringPage() {
     setTimeout(() => {
       setSaving(false);
       setSuccess(true);
+      triggerTraining(project.id);
       setTimeout(() => setSuccess(false), 3000);
     }, 1200);
   };

@@ -53,6 +53,7 @@ def trigger_training(project_id: str, db: Session = Depends(get_db)):
                         {"feature": "tenure", "value": "3 months", "impact": "+10.6%"}
                     ]
                 }
+                card.model_path = results.get("model_path")
                 card.status = "Ready for Deployment"
             
             db_job.add(TimelineEvent(

@@ -7,9 +7,22 @@ from database.models import Base
 from routers.projects import router as projects_router
 from routers.training import router as training_router
 from routers.chat import router as chat_router
+from routers.auth import router as auth_router
 
 # Initialize database tables
 Base.metadata.create_all(bind=engine)
+
+# Add new columns if they do not exist in the database (migration fallback)
+from sqlalchemy import text
+with engine.connect() as conn:
+    try:
+        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS dataset_path VARCHAR;"))
+        conn.execute(text("ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS model_path VARCHAR;"))
+        conn.execute(text("ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS models_comparison_json JSON;"))
+        conn.commit()
+        print("Database schema migration checked successfully.")
+    except Exception as e:
+        print(f"Database migration columns exception: {e}")
 
 app = FastAPI(title="AIDSO Backend API", version="1.0.0")
 
@@ -26,6 +39,7 @@ app.add_middleware(
 app.include_router(projects_router)
 app.include_router(training_router)
 app.include_router(chat_router)
+app.include_router(auth_router)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -30,8 +30,18 @@ services:
     container_name: aidso-frontend
     depends_on:
       - backend
+    # Port mapping removed - access goes through api-gateway reverse proxy
+
+  # Nginx API Gateway & Load Balancer
+  api-gateway:
+    build:
+      context: ./gateway
+    container_name: aidso-gateway
+    depends_on:
+      - frontend
+      - backend
     ports:
-      - "8080:80"
+      - "8081:80"
 
   # Database Storage
   postgres:

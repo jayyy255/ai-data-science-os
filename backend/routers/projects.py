@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
+import io
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -43,7 +45,8 @@ async def create_project(
         target_variable=target_variable,
         problem_type=understanding.get("problem_type", "classification"),
         description=description,
-        status="EDA Phase"
+        status="EDA Phase",
+        dataset_path=s3_path
     )
     db.add(db_project)
     
@@ -74,9 +77,51 @@ async def create_project(
         numerical_count=profile["numerical_count"],
         categorical_count=profile["categorical_count"],
         quality_health_json=profile["quality_health"],
+        models_comparison_json={
+            'XGBoost': { 'status': 'Idle', 'metric': None },
+            'LightGBM': { 'status': 'Idle', 'metric': None },
+            'Random Forest': { 'status': 'Idle', 'metric': None },
+            'Neural Network': { 'status': 'Idle', 'metric': None },
+            'Tabular Transformer': { 'status': 'Idle', 'metric': None }
+        },
         status="EDA Phase"
     )
     db.add(db_card)
+
+    # Initialize Feature Engineering Decisions
+    for feat in profile["features"]:
+        feat_name = feat["name"]
+        if feat_name == target_variable:
+            continue
+        
+        missing_pct = feat["missing"]
+        feat_type = feat["type"]
+        unique_val = feat["unique"]
+        
+        if missing_pct > 0:
+            rec_decision = "Impute Median"
+            rec_reason = f"Feature '{feat_name}' has {missing_pct}% missing values. Imputation is required to preserve data matrix integrity."
+            confidence = 0.95
+        elif "int" in feat_type or "float" in feat_type:
+            rec_decision = "Standard Scaling"
+            rec_reason = f"Standard scaling normalization is recommended for numeric variable of type {feat_type} to speed up optimizer convergence."
+            confidence = 0.90
+        else:
+            rec_decision = "One-Hot Encoding"
+            rec_reason = f"Encode categorical feature '{feat_name}' with {unique_val} unique labels to feed numerical representation to estimators."
+            confidence = 0.88
+            
+        db_decision = DecisionMemory(
+            project_id=project_id,
+            feature_name=feat_name,
+            decision=rec_decision,
+            reason=rec_reason,
+            confidence=confidence,
+            override_active=False,
+            user_choice=None
+        )
+        db.add(db_decision)
+        
     db.commit()
     db.refresh(db_project)
     
@@ -142,3 +187,20 @@ def apply_override(project_id: str, payload: DecisionOverride, db: Session = Dep
     ))
     db.commit()
     return {"status": "success", "decision": dec}
+
+@router.get("/{project_id}/download-model")
+def download_model(project_id: str, db: Session = Depends(get_db)):
+    card = db.query(KnowledgeCard).filter(KnowledgeCard.project_id == project_id).first()
+    if not card or not card.model_path:
+        raise HTTPException(status_code=404, detail="Model binary not found for this project")
+        
+    try:
+        model_bytes = minio.download_file(card.model_path)
+        filename = f"{project_id}_model.pkl"
+        return StreamingResponse(
+            io.BytesIO(model_bytes),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve model binary: {e}")
