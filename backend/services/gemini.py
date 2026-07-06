@@ -83,4 +83,5 @@ class GeminiService:
             )
             return response.text.strip()
         except Exception as e:
-            return f"Error interacting with Gemini API: {e}"
+            print(f"Gemini API Error in assistant_chat: {e}")
+            return "Sorry for the inconvenience, the AI is unavailable right now. It shall be back shortly."

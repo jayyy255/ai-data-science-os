@@ -91,7 +91,7 @@ class TrainingWorker:
             finally:
                 db.close()
 
-    def process_training_job(self, project_id: str, target: str, problem_type: str, features_override: list = None):
+    def process_training_job(self, project_id: str, target: str, problem_type: str, imputation_method: str = "Median", features_override: list = None):
         """
         Runs the full Optuna HPO + MLflow + SHAP calculations pipeline on the actual dataset.
         """
@@ -102,10 +102,9 @@ class TrainingWorker:
         import mlflow
         import io
         import pickle
-        from database.models import Project
-        from services.minio_client import MinIOClient
+        from services.storage.factory import get_storage_provider
 
-        print(f"Starting pipeline training job for project: {project_id}")
+        print(f"Starting pipeline training job for project: {project_id} with imputation: {imputation_method}")
         
         # 1. Initialize MLflow tracking
         mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
@@ -114,15 +113,20 @@ class TrainingWorker:
         # Try to load the real dataset from MinIO
         loaded_real = False
         try:
-            minio = MinIOClient()
+            storage = get_storage_provider()
             db = self.db_session_maker()
+            from database.models import Project
             project = db.query(Project).filter(Project.id == project_id).first()
             db.close()
             
             if project and project.dataset_path:
                 print(f"Downloading real dataset from: {project.dataset_path}")
-                file_bytes = minio.download_file(project.dataset_path)
+                file_bytes = storage.download_file(project.dataset_path)
                 df = pd.read_csv(io.BytesIO(file_bytes))
+                
+                # Apply the user-selected imputation algorithm
+                from routers.projects import apply_imputation
+                df = apply_imputation(df, imputation_method)
                 
                 if target in df.columns:
                     y = df[target]
@@ -136,8 +140,7 @@ class TrainingWorker:
                             else:
                                 X = pd.get_dummies(X, columns=[col], drop_first=True)
                                 
-                    # Fill missing values
-                    X = X.fillna(X.median(numeric_only=True))
+                    # Fill missing values safety check
                     X = X.fillna(0)
                     
                     loaded_real = True
@@ -407,15 +410,21 @@ class TrainingWorker:
         # Sort features by importance
         shap_importance = sorted(shap_importance, key=lambda x: x['shap'], reverse=True)
 
-        # 5. Serialize model and upload binary to MinIO
+        # 5. Serialize model and upload binaries to MinIO / S3
         model_url = "Pending"
         try:
-            model_bytes = pickle.dumps(champion_model)
-            minio_client = MinIOClient()
-            model_url = minio_client.upload_model(project_id, "v1", model_bytes)
-            print(f"Successfully uploaded champion model binary to MinIO: {model_url}")
+            storage = get_storage_provider()
+            model_urls = {}
+            for m_name, m_obj in trained_models.items():
+                m_slug = m_name.lower().replace(" ", "_")
+                m_bytes = pickle.dumps(m_obj)
+                m_url = storage.upload_model(project_id, m_slug, m_bytes)
+                model_urls[m_name] = m_url
+                
+            model_url = model_urls.get(best_model_name, "Pending")
+            print(f"Successfully uploaded all model binaries: {model_urls}")
         except Exception as e:
-            print(f"Failed to upload model binary to MinIO: {e}")
+            print(f"Failed to upload model binaries to storage: {e}")
 
         print(f"Trained champion model registered. SHAP Explanations calculated.")
         

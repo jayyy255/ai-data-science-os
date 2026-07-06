@@ -3,23 +3,38 @@ import { useProjectStore } from '../store/useProjectStore';
 import { Cpu, RefreshCw, Layers, CheckCircle2, Server, Play, HelpCircle, Activity, Sparkles } from 'lucide-react';
 
 export default function TrainingPage() {
-  const { getActiveProject, triggerTraining, fetchProjectDetails } = useProjectStore();
+  const { getActiveProject, triggerTraining, fetchProjectDetails, fetchProjectJobs, projectJobs } = useProjectStore();
   const project = getActiveProject();
 
   const [activeTab, setActiveTab] = useState('pipeline');
-  const isTraining = project.status === 'Training';
+  const [selectedImputation, setSelectedImputation] = useState('KNN');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const isTraining = project.status === 'Training' || isSubmitting;
 
   useEffect(() => {
-    if (isTraining) {
+    fetchProjectJobs(project.id);
+  }, [project.id, fetchProjectJobs]);
+
+  useEffect(() => {
+    if (project.status === 'Training') {
       const interval = setInterval(() => {
         fetchProjectDetails(project.id);
+        fetchProjectJobs(project.id);
       }, 3000);
       return () => clearInterval(interval);
     }
-  }, [isTraining, project.id, fetchProjectDetails]);
+  }, [project.status, project.id, fetchProjectDetails, fetchProjectJobs]);
 
-  const handleStartTraining = () => {
-    triggerTraining(project.id);
+  const handleStartTraining = async () => {
+    setIsSubmitting(true);
+    try {
+      await triggerTraining(project.id, selectedImputation);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Get dynamic model comparison status from DB, or default fallbacks
@@ -35,30 +50,71 @@ export default function TrainingPage() {
     return project.problemType === 'classification' ? 'F1 Validation Score' : 'MSE Validation Loss';
   };
 
+  const totalModels = 5;
+  const trainedCount = Object.values(models).filter(m => m.status === 'Trained').length;
+  const progressPercent = Math.round((trainedCount / totalModels) * 100);
+  const currentTrainingModel = Object.keys(models).find(name => models[name].status === 'Training') || 'Optuna Optimization';
+
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-display font-bold text-white tracking-tight">Model Training & HPO</h1>
-          <p className="text-sm text-zinc-400">Asynchronous Kafka training pipeline and Optuna HPO optimization.</p>
+          <p className="text-sm text-zinc-400">Asynchronous database queue training pipeline and Optuna HPO optimization.</p>
         </div>
         
         {!isTraining ? (
-          <button
-            onClick={handleStartTraining}
-            className="flex items-center gap-1.5 bg-brand-primary hover:bg-brand-primary-hover px-4 py-2 rounded-xl text-sm font-bold text-white transition-all cursor-pointer shadow-lg shadow-brand-primary/20 animate-pulse"
-          >
-            <Play className="w-4 h-4 fill-white" />
-            Start Training Job
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col text-right">
+              <span className="text-[10px] text-zinc-500 font-mono font-bold uppercase">Training Dataset</span>
+              <select
+                value={selectedImputation}
+                onChange={(e) => setSelectedImputation(e.target.value)}
+                className="bg-brand-dark-surface border border-brand-dark-border rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-300 outline-none focus:border-brand-primary cursor-pointer font-mono"
+              >
+                <option value="Median">Median Imputation</option>
+                <option value="Mean">Mean Imputation</option>
+                <option value="Mode">Mode Imputation</option>
+                <option value="KNN">KNN Imputation (Champion)</option>
+              </select>
+            </div>
+            
+            <button
+              onClick={handleStartTraining}
+              className="flex items-center gap-1.5 bg-brand-primary hover:bg-brand-primary-hover px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all cursor-pointer shadow-lg shadow-brand-primary/20"
+            >
+              <Play className="w-4 h-4 fill-white" />
+              Start Training Job
+            </button>
+          </div>
         ) : (
-          <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 px-4 py-2 rounded-xl text-sm font-semibold">
+          <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 px-4 py-2.5 rounded-xl text-sm font-semibold">
             <RefreshCw className="w-4 h-4 animate-spin" />
             Optuna Searching & Comparing...
           </div>
         )}
       </div>
+
+      {/* Real-time Progress Bar */}
+      {isTraining && (
+        <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 space-y-3">
+          <div className="flex justify-between items-center text-xs font-mono">
+            <div className="flex items-center gap-2 text-zinc-300">
+              <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+              <span>Current Task: <strong className="text-violet-300">{currentTrainingModel}</strong></span>
+            </div>
+            <span className="text-zinc-500 font-bold">{trainedCount} of {totalModels} models completed ({progressPercent}%)</span>
+          </div>
+          
+          <div className="w-full bg-brand-dark-bg h-2.5 rounded-full overflow-hidden border border-brand-dark-border/40">
+            <div 
+              className="bg-brand-primary h-full transition-all duration-500 shadow-[0_0_8px_rgba(124,58,237,0.5)]"
+              style={{ width: `${Math.max(5, progressPercent)}%` }}
+            ></div>
+          </div>
+        </div>
+      )}
 
       {/* Selector Tabs */}
       <div className="flex border-b border-brand-dark-border/40 gap-6">
@@ -325,6 +381,82 @@ export default function TrainingPage() {
           </div>
         </div>
       )}
+
+      {/* Past Training Jobs History */}
+      <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 space-y-4">
+        <div className="flex justify-between items-center">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-200">HPO & Ensemble Training History</h3>
+            <p className="text-xs text-zinc-500 font-mono">Audited history of training jobs executed on this project</p>
+          </div>
+          <button 
+            onClick={() => fetchProjectJobs(project.id)}
+            className="text-xs text-brand-primary hover:text-violet-300 font-semibold flex items-center gap-1 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Refresh History
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          {projectJobs[project.id] && projectJobs[project.id].length > 0 ? (
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-brand-dark-border text-zinc-500 uppercase font-mono">
+                  <th className="py-2.5 px-3">Job ID</th>
+                  <th className="py-2.5 px-3">Model Type / Configuration</th>
+                  <th className="py-2.5 px-3">Imputation</th>
+                  <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3">Accuracy / Best F1</th>
+                  <th className="py-2.5 px-3">Started At</th>
+                  <th className="py-2.5 px-3">Completed At</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-brand-dark-border/40 text-zinc-300">
+                {projectJobs[project.id].map((job) => {
+                  const isCompleted = job.status === 'completed';
+                  const isFailed = job.status === 'failed';
+                  const isRunning = job.status === 'running';
+                  
+                  return (
+                    <tr key={job.id} className="hover:bg-brand-dark-bg/20 font-mono">
+                      <td className="py-3 px-3 font-semibold">#{job.id}</td>
+                      <td className="py-3 px-3 text-zinc-400 font-semibold">{job.model_type}</td>
+                      <td className="py-3 px-3 text-violet-400 font-bold">{job.imputation_method || 'Median'}</td>
+                      <td className="py-3 px-3">
+                        <span className={`px-2 py-0.5 rounded-full font-semibold ${
+                          isCompleted 
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : isFailed
+                              ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                              : isRunning
+                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
+                                : 'bg-zinc-800 text-zinc-500 border border-brand-dark-border'
+                        }`}>
+                          {job.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-violet-300 font-bold">
+                        {job.metrics_json?.best_metric ? job.metrics_json.best_metric.toFixed(4) : 'N/A'}
+                      </td>
+                      <td className="py-3 px-3 text-zinc-500">
+                        {job.started_at ? new Date(job.started_at).toLocaleString() : 'Pending'}
+                      </td>
+                      <td className="py-3 px-3 text-zinc-500">
+                        {job.completed_at ? new Date(job.completed_at).toLocaleString() : 'N/A'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div className="text-center py-8 text-zinc-500 text-xs">
+              No training jobs have been executed yet. Click "Start Training Job" above to launch the first run.
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

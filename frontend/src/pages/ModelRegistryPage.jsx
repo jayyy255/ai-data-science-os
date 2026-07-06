@@ -75,7 +75,8 @@ export default function ModelRegistryPage() {
 
   const handleDownload = (reg) => {
     if (reg.status !== 'Training') {
-      window.open(`http://localhost:8000/api/projects/${project.id}/download-model`, '_blank');
+      const API_BASE = window.location.origin.includes('localhost') ? 'http://localhost:8000/api' : '/api';
+      window.open(`${API_BASE}/projects/${project.id}/download-model?model_name=${encodeURIComponent(reg.algorithm)}`, '_blank');
     } else {
       alert('This model is currently training.');
     }

@@ -8,13 +8,13 @@ from database.connection import get_db
 from database.models import Project, DecisionMemory, TimelineEvent, KnowledgeCard
 from services.dataset import DatasetService
 from services.gemini import GeminiService
-from services.minio_client import MinIOClient
+from services.storage.factory import get_storage_provider
 from services.cache import RedisCacheService
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 gemini = GeminiService()
-minio = MinIOClient()
+storage = get_storage_provider()
 cache = RedisCacheService()
 
 class DecisionOverride(BaseModel):
@@ -26,14 +26,39 @@ async def create_project(
     name: str = Form(...),
     target_variable: str = Form(...),
     description: str = Form(...),
+    username: str = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Only CSV files are allowed.")
+
     file_bytes = await file.read()
-    s3_path = minio.upload_dataset(file.filename, file_bytes)
     
+    # Enforce file size limit
+    MAX_FILE_SIZE = 100 * 1024 * 1024 # 100 MB
+    if len(file_bytes) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"File exceeds maximum allowed size of 100MB (actual: {len(file_bytes) / (1024*1024):.1f}MB)"
+        )
+
     # Dataset Intelligence Service
     profile = DatasetService.profile_dataset(file_bytes, target_variable)
+    
+    # Enforce rows and columns limit
+    if profile.get("rows_count", 0) > 200000:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dataset rows exceed maximum allowed limit of 200,000 (actual: {profile['rows_count']})"
+        )
+    if profile.get("columns_count", 0) > 200:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dataset columns exceed maximum allowed limit of 200 (actual: {profile['columns_count']})"
+        )
+
+    s3_path = storage.upload_dataset(file.filename, file_bytes)
     
     # Gemini AI Project Understanding Agent
     understanding = gemini.understand_project(name, description, target_variable)
@@ -46,7 +71,8 @@ async def create_project(
         problem_type=understanding.get("problem_type", "classification"),
         description=description,
         status="EDA Phase",
-        dataset_path=s3_path
+        dataset_path=s3_path,
+        username=username
     )
     db.add(db_project)
     
@@ -135,8 +161,13 @@ async def create_project(
     }
 
 @router.get("")
-def list_projects(db: Session = Depends(get_db)):
-    return db.query(Project).all()
+def list_projects(username: str = None, db: Session = Depends(get_db)):
+    query = db.query(Project)
+    if username:
+        query = query.filter(Project.username == username)
+    else:
+        query = query.filter(Project.username == None)
+    return query.all()
 
 @router.get("/{project_id}")
 def get_project(project_id: str, db: Session = Depends(get_db)):
@@ -189,18 +220,95 @@ def apply_override(project_id: str, payload: DecisionOverride, db: Session = Dep
     return {"status": "success", "decision": dec}
 
 @router.get("/{project_id}/download-model")
-def download_model(project_id: str, db: Session = Depends(get_db)):
+def download_model(project_id: str, model_name: str = None, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
     card = db.query(KnowledgeCard).filter(KnowledgeCard.project_id == project_id).first()
-    if not card or not card.model_path:
+    if not project or not card or not card.model_path:
         raise HTTPException(status_code=404, detail="Model binary not found for this project")
         
     try:
-        model_bytes = minio.download_file(card.model_path)
-        filename = f"{project_id}_model.pkl"
+        path = card.model_path
+        if model_name:
+            m_slug = model_name.lower().replace(" ", "_")
+            if path.startswith("s3://"):
+                path = f"s3://aidso-runs/models/{project_id}/{m_slug}.pkl"
+            elif path.startswith("file://"):
+                import re
+                folder = re.sub(r'/[^/]+\.pkl$', '', path)
+                path = f"{folder}/{project_id}_{m_slug}.pkl"
+                
+        model_bytes = storage.download_file(path)
+        
+        # Parse dataset name from project.dataset_path
+        import os
+        import re
+        dataset_name = "dataset"
+        if project.dataset_path:
+            dataset_name = os.path.basename(project.dataset_path).replace(".csv", "")
+        
+        # Format filename: {project_name}_{dataset_name}_{model_name}.pkl
+        proj_slug = re.sub(r'\s+', '_', project.name)
+        m_name_slug = re.sub(r'\s+', '_', model_name or card.best_model or "champion")
+        filename = f"{proj_slug}_{dataset_name}_{m_name_slug}.pkl"
+        
+        # Safe characters for HTTP header
+        filename = re.sub(r'[^a-zA-Z0-9_\-\.]', '', filename)
+        
         return StreamingResponse(
             io.BytesIO(model_bytes),
             media_type="application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            headers={"content-disposition": f"attachment; filename={filename}"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve model binary: {e}")
+
+
+def apply_imputation(df, method: str):
+    import numpy as np
+    import pandas as pd
+    df_copy = df.copy()
+    for col in df_copy.columns:
+        if df_copy[col].isnull().sum() > 0:
+            if df_copy[col].dtype in ['int64', 'float64', 'float32', 'int32']:
+                if method == 'Mean':
+                    df_copy[col] = df_copy[col].fillna(df_copy[col].mean())
+                elif method == 'Mode':
+                    df_copy[col] = df_copy[col].fillna(df_copy[col].mode().iloc[0] if not df_copy[col].mode().empty else 0)
+                elif method == 'KNN':
+                    df_copy[col] = df_copy[col].interpolate().fillna(df_copy[col].mean())
+                else: # Median (Default)
+                    df_copy[col] = df_copy[col].fillna(df_copy[col].median())
+            else:
+                df_copy[col] = df_copy[col].fillna(df_copy[col].mode().iloc[0] if not df_copy[col].mode().empty else "Missing")
+    return df_copy
+
+
+@router.get("/{project_id}/download-dataset")
+def download_dataset(project_id: str, imputation_method: str = "Median", db: Session = Depends(get_db)):
+    import pandas as pd
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project or not project.dataset_path:
+        raise HTTPException(status_code=404, detail="Dataset not found for this project")
+        
+    try:
+        # Load raw dataset from S3/MinIO
+        file_bytes = storage.download_file(project.dataset_path)
+        df = pd.read_csv(io.BytesIO(file_bytes))
+        
+        # Apply imputation method
+        modified_df = apply_imputation(df, imputation_method)
+        
+        # Export to CSV bytes
+        out_buf = io.StringIO()
+        modified_df.to_csv(out_buf, index=False)
+        csv_bytes = out_buf.getvalue().encode("utf-8")
+        
+        filename = f"{project_id}_imputed_{imputation_method.lower()}.csv"
+        return StreamingResponse(
+            io.BytesIO(csv_bytes),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process and download dataset: {e}")
+

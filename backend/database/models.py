@@ -12,6 +12,7 @@ class Project(Base):
     target_variable = Column(String, nullable=False)
     problem_type = Column(String, nullable=False)  # classification, regression
     description = Column(String, nullable=True)
+    username = Column(String, ForeignKey('users.username', ondelete='CASCADE'), nullable=True)
     status = Column(String, default='Created')  # Created, EDA, Preprocessed, Training, Ready
     dataset_path = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -112,5 +113,6 @@ class TrainingJob(Base):
     completed_at = Column(DateTime, nullable=True)
     artifact_path = Column(String, nullable=True)
     metrics_json = Column(JSON, nullable=True)
+    imputation_method = Column(String, nullable=False, default='Median')
 
     project = relationship("Project")

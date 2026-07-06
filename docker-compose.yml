@@ -10,7 +10,6 @@ services:
       - postgres
       - redis
       - minio
-      - kafka
     ports:
       - "8000:8000"
     environment:
@@ -78,28 +77,25 @@ services:
       - minio_data:/data
 
   # Kafka pipeline event broker
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.3.0
-    container_name: aidso-zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-
-  kafka:
-    image: confluentinc/cp-kafka:7.3.0
-    container_name: aidso-kafka
+  # HPO Background Worker
+  worker:
+    build:
+      context: ./backend
+    container_name: aidso-worker
+    command: python worker/worker.py
     depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
+      - postgres
+      - redis
+      - minio
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/aidso
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ENVIRONMENT=local
+    volumes:
+      - ./backend:/app
 
   # Experiment tracking dashboard
   mlflow:

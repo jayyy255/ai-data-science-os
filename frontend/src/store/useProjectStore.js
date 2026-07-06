@@ -165,8 +165,9 @@ const defaultDemandProject = {
 };
 
 export const useProjectStore = create((set, get) => ({
-  projects: [defaultChurnProject, defaultDemandProject],
-  activeProjectId: 'churn-prediction',
+  projects: [],
+  activeProjectId: '',
+  projectJobs: {},
   currentUser: (() => {
     try {
       const stored = localStorage.getItem('aidso-user');
@@ -195,6 +196,21 @@ export const useProjectStore = create((set, get) => ({
   setActiveProjectId: (id) => {
     set({ activeProjectId: id });
     get().fetchProjectDetails(id);
+    get().fetchProjectJobs(id);
+  },
+
+  fetchProjectJobs: async (projectId) => {
+    try {
+      const res = await axios.get(`${API_BASE}/projects/${projectId}/jobs`);
+      set((state) => ({
+        projectJobs: {
+          ...state.projectJobs,
+          [projectId]: res.data.jobs
+        }
+      }));
+    } catch (e) {
+      console.warn("Failed fetching project jobs", e);
+    }
   },
 
   // Auth actions
@@ -256,10 +272,11 @@ export const useProjectStore = create((set, get) => ({
     connections: { ...state.connections, ...newConnections }
   })),
 
-  // API sync action
   fetchProjects: async () => {
     try {
-      const res = await axios.get(`${API_BASE}/projects`);
+      const user = get().currentUser;
+      const url = user ? `${API_BASE}/projects?username=${encodeURIComponent(user.username)}` : `${API_BASE}/projects`;
+      const res = await axios.get(url);
       const apiProjects = res.data.map(p => ({
         id: p.id,
         name: p.name,
@@ -294,7 +311,7 @@ export const useProjectStore = create((set, get) => ({
         monitoring: { driftPsi: 0, driftStatus: 'HEALTHY', driftAlerts: [] }
       }));
       
-      set({ projects: apiProjects.length > 0 ? apiProjects : get().projects });
+      set({ projects: apiProjects });
 
       // Sync active project details if it's in the list
       const activeId = get().activeProjectId;
@@ -430,6 +447,11 @@ export const useProjectStore = create((set, get) => ({
       formData.append('target_variable', targetVariable);
       formData.append('description', description);
       
+      const user = get().currentUser;
+      if (user) {
+        formData.append('username', user.username);
+      }
+      
       // Send empty mock file since file object is created/stored locally
       const mockFile = new File(["col1,col2\n1,2"], datasetName || "dataset.csv", { type: "text/csv" });
       formData.append('file', mockFile);
@@ -514,7 +536,7 @@ export const useProjectStore = create((set, get) => ({
   },
 
   // Trigger training via Kafka API
-  triggerTraining: async (projectId) => {
+  triggerTraining: async (projectId, imputationMethod = "Median") => {
     set((state) => ({
       projects: state.projects.map((p) => {
         if (p.id !== projectId) return p;
@@ -525,7 +547,7 @@ export const useProjectStore = create((set, get) => ({
             {
               time: new Date().toLocaleTimeString(),
               title: 'Model Training Started',
-              desc: 'Training request successfully dispatched to Kafka model-training-tasks broker.',
+              desc: `Training request successfully dispatched using '${imputationMethod}' imputation.`,
               type: 'info'
             },
             ...p.timeline
@@ -535,7 +557,7 @@ export const useProjectStore = create((set, get) => ({
     }));
 
     try {
-      await axios.post(`${API_BASE}/projects/${projectId}/train`);
+      await axios.post(`${API_BASE}/projects/${projectId}/train?imputation_method=${imputationMethod}`);
       await get().fetchProjectDetails(projectId);
       
       const pollInterval = setInterval(async () => {

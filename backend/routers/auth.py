@@ -3,13 +3,20 @@ from sqlalchemy.orm import Session
 from database.connection import get_db
 from database.models import User, UserSession
 from pydantic import BaseModel
-from passlib.context import CryptContext
 from datetime import datetime, timedelta
+import bcrypt
 import uuid
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def verify_password(password: str, hashed_password: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except Exception:
+        return False
 
 class SignupRequest(BaseModel):
     full_name: str
@@ -45,7 +52,7 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
             detail="Email is already registered"
         )
         
-    hashed_password = pwd_context.hash(payload.password)
+    hashed_password = hash_password(payload.password)
     new_user = User(
         full_name=payload.full_name,
         username=payload.username,
@@ -86,7 +93,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         (User.email == payload.identity) | (User.username == payload.identity)
     ).first()
     
-    if not user or not pwd_context.verify(payload.password, user.password_hash):
+    if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username/email or password"
@@ -135,7 +142,7 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
         
     # Reset password to a standard test value: reset12345
     temp_pass = "reset12345"
-    user.password_hash = pwd_context.hash(temp_pass)
+    user.password_hash = hash_password(temp_pass)
     db.commit()
     
     return {

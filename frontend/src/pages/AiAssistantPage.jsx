@@ -39,13 +39,18 @@ export default function AiAssistantPage() {
     setLoading(true);
 
     try {
-      const res = await axios.post(`http://localhost:8000/api/projects/${project.id}/chat`, {
+      const API_BASE = window.location.origin.includes('localhost') ? 'http://localhost:8000/api' : '/api';
+      const res = await axios.post(`${API_BASE}/projects/${project.id}/chat`, {
         question: textToSend
       });
-      setMessages(prev => [...prev, { sender: 'ai', text: res.data.answer }]);
+      let responseText = res.data.answer;
+      if (responseText && (responseText.includes("Error interacting with Gemini API") || responseText.includes("API key not valid"))) {
+        responseText = "Sorry for the inconvenience, the AI is unavailable right now. It shall be back shortly.";
+      }
+      setMessages(prev => [...prev, { sender: 'ai', text: responseText }]);
       setLoading(false);
     } catch (err) {
-      console.warn("Backend API chat failed. Falling back to local offline logic.", err);
+      console.warn("Backend API chat failed.", err);
       // Simulate AI response based on questions
       setTimeout(() => {
         let aiText = `I analyzed the Project Memory for ${project.name}. `;

@@ -79,85 +79,105 @@ export default function DashboardPage() {
         <h2 className="text-xl font-display font-semibold text-zinc-200">Recent Projects</h2>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {projects.map((p) => {
-            const isCompleted = p.status === 'Ready for Deployment';
-            const isTraining = p.status === 'Training';
-            
-            return (
-              <div 
-                key={p.id}
-                className="bg-brand-dark-surface border border-brand-dark-border hover:border-violet-500/30 rounded-xl p-5 flex flex-col justify-between transition-all group hover:shadow-lg hover:shadow-brand-primary/5"
-              >
-                <div className="space-y-3">
-                  {/* Card Header */}
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-lg font-display font-bold text-zinc-100 group-hover:text-violet-300 transition-colors">
-                        {p.name}
-                      </h3>
-                      <span className="text-xs font-mono text-zinc-500 uppercase">Target: {p.targetVariable}</span>
-                    </div>
-
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                      isCompleted 
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                        : isTraining 
-                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
-                          : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
-                    }`}>
-                      {p.status}
-                    </span>
-                  </div>
-
-                  {/* Description */}
-                  <p className="text-sm text-zinc-400 leading-relaxed line-clamp-2">
-                    {p.description}
-                  </p>
-
-                  {/* Summary Specs */}
-                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-brand-dark-border/40 text-center font-mono">
-                    <div className="bg-brand-dark-bg/60 p-2 rounded-lg border border-brand-dark-border/20">
-                      <span className="text-[10px] text-zinc-500 uppercase">Rows</span>
-                      <p className="text-xs font-bold text-zinc-300 mt-0.5">{p.rowsCount?.toLocaleString()}</p>
-                    </div>
-                    <div className="bg-brand-dark-bg/60 p-2 rounded-lg border border-brand-dark-border/20">
-                      <span className="text-[10px] text-zinc-500 uppercase">Features</span>
-                      <p className="text-xs font-bold text-zinc-300 mt-0.5">{p.columnsCount}</p>
-                    </div>
-                    <div className="bg-brand-dark-bg/60 p-2 rounded-lg border border-brand-dark-border/20">
-                      <span className="text-[10px] text-zinc-500 uppercase">Best Model</span>
-                      <p className="text-xs font-bold text-violet-300 mt-0.5 truncate">{p.bestModel}</p>
-                    </div>
-                  </div>
-
-                  {/* Model score */}
-                  {p.bestF1 && (
-                    <div className="flex items-center justify-between text-xs bg-emerald-500/5 border border-emerald-500/10 p-2.5 rounded-xl">
-                      <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Best Score (F1)</span>
+          {projects.length > 0 ? (
+            projects.slice(0, 5).map((p) => {
+              const isCompleted = p.status === 'Ready for Deployment';
+              const isTraining = p.status === 'Training';
+              
+              return (
+                <div 
+                  key={p.id}
+                  className="bg-brand-dark-surface border border-brand-dark-border hover:border-violet-500/30 rounded-xl p-5 flex flex-col justify-between transition-all group hover:shadow-lg hover:shadow-brand-primary/5"
+                >
+                  <div className="space-y-3">
+                    {/* Card Header */}
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="text-lg font-display font-bold text-zinc-100 group-hover:text-violet-300 transition-colors">
+                          {p.name}
+                        </h3>
+                        <span className="text-xs font-mono text-zinc-500 uppercase">Target: {p.targetVariable}</span>
                       </div>
-                      <span className="font-mono font-bold text-emerald-400 text-sm">{p.bestF1}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                        isCompleted 
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                          : isTraining 
+                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
+                            : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
+                      }`}>
+                        {p.status}
+                      </span>
                     </div>
-                  )}
+  
+                    {/* Description */}
+                    <p className="text-sm text-zinc-400 leading-relaxed line-clamp-2">
+                      {p.description}
+                    </p>
+  
+                    {/* Summary Specs */}
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-brand-dark-border/40 text-center font-mono">
+                      <div className="bg-brand-dark-bg/60 p-2 rounded-lg border border-brand-dark-border/20">
+                        <span className="text-[10px] text-zinc-500 uppercase">Rows</span>
+                        <p className="text-xs font-bold text-zinc-300 mt-0.5">{p.rowsCount?.toLocaleString()}</p>
+                      </div>
+                      <div className="bg-brand-dark-bg/60 p-2 rounded-lg border border-brand-dark-border/20">
+                        <span className="text-[10px] text-zinc-500 uppercase">Features</span>
+                        <p className="text-xs font-bold text-zinc-300 mt-0.5">{p.columnsCount}</p>
+                      </div>
+                      <div className="bg-brand-dark-bg/60 p-2 rounded-lg border border-brand-dark-border/20">
+                        <span className="text-[10px] text-zinc-500 uppercase">Best Model</span>
+                        <p className="text-xs font-bold text-violet-300 mt-0.5 truncate">{p.bestModel}</p>
+                      </div>
+                    </div>
+  
+                    {/* Model score */}
+                    {p.bestF1 && (
+                      <div className="flex items-center justify-between text-xs bg-emerald-500/5 border border-emerald-500/10 p-2.5 rounded-xl">
+                        <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Best Score (F1)</span>
+                        </div>
+                        <span className="font-mono font-bold text-emerald-400 text-sm">{p.bestF1}</span>
+                      </div>
+                    )}
+                  </div>
+  
+                  {/* Card Actions */}
+                  <div className="flex items-center gap-3 mt-5 pt-3 border-t border-brand-dark-border/40">
+                    <button
+                      onClick={() => {
+                        setActiveProjectId(p.id);
+                        navigate('/overview');
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1 bg-brand-dark-card hover:bg-brand-dark-border border border-brand-dark-border hover:text-white px-4 py-2 rounded-xl text-xs font-bold text-zinc-300 transition-all cursor-pointer"
+                    >
+                      Open Workspace
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-
-                {/* Card Actions */}
-                <div className="flex items-center gap-3 mt-5 pt-3 border-t border-brand-dark-border/40">
-                  <button
-                    onClick={() => {
-                      setActiveProjectId(p.id);
-                      navigate('/overview');
-                    }}
-                    className="flex-1 flex items-center justify-center gap-1 bg-brand-dark-card hover:bg-brand-dark-border border border-brand-dark-border hover:text-white px-4 py-2 rounded-xl text-xs font-bold text-zinc-300 transition-all cursor-pointer"
-                  >
-                    Open Workspace
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+              );
+            })
+          ) : (
+            <div className="col-span-2 bg-brand-dark-surface border border-brand-dark-border border-dashed rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-4">
+              <div className="p-4 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400">
+                <Database className="w-8 h-8" />
               </div>
-            );
-          })}
+              <div className="space-y-1 max-w-sm">
+                <h3 className="text-zinc-200 font-bold text-base">No active projects</h3>
+                <p className="text-xs text-zinc-500 leading-relaxed">
+                  Start your local HPO experiments by initializing a new data science workspace.
+                </p>
+              </div>
+              <Link
+                to="/create-project"
+                className="bg-brand-primary hover:bg-brand-primary-hover text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-lg shadow-violet-500/20 flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Initialize New Workspace
+              </Link>
+            </div>
+          )}
         </div>
       </div>
     </div>
