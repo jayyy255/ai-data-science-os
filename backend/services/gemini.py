@@ -13,7 +13,20 @@ MOCK_UNDERSTANDING = {
 
 class GeminiService:
     def __init__(self):
-        # Configure SDK key if available in env
+        # Configure SDK key from env, prioritizing /app/.env file values to bypass Docker Compose overrides
+        env_path = "/app/.env"
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            k, v = line.split('=', 1)
+                            if k.strip() == "GEMINI_API_KEY":
+                                os.environ["GEMINI_API_KEY"] = v.strip()
+            except Exception as env_err:
+                print(f"Failed to load /app/.env manually: {env_err}")
+
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             self.client = genai.Client(api_key=api_key)
@@ -46,7 +59,7 @@ class GeminiService:
             Do not wrap in markdown syntax. Return raw JSON string.
             """
             response = self.client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',
                 contents=prompt
             )
             return json.loads(response.text.strip())
@@ -78,10 +91,14 @@ class GeminiService:
             User Question: {question}
             """
             response = self.client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',
                 contents=context
             )
             return response.text.strip()
         except Exception as e:
-            print(f"Gemini API Error in assistant_chat: {e}")
+            err_msg = str(e)
+            # Log precise diagnostics on the server side (visible to us in container logs/CLI)
+            print(f"DIAGNOSTIC ERROR - Gemini API Key Issue: {err_msg}")
+            
+            # Return generic friendly fallback to the client
             return "Sorry for the inconvenience, the AI is unavailable right now. It shall be back shortly."

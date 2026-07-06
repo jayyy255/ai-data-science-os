@@ -19,9 +19,11 @@ with engine.connect() as conn:
     try:
         conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS dataset_path VARCHAR;"))
         conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS username VARCHAR;"))
+        conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS eda_profile_json JSON;"))
         conn.execute(text("ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS model_path VARCHAR;"))
         conn.execute(text("ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS models_comparison_json JSON;"))
         conn.execute(text("ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS imputation_method VARCHAR DEFAULT 'Median';"))
+        conn.execute(text("ALTER TABLE decision_memory ADD COLUMN IF NOT EXISTS comparison_metrics_json JSON;"))
         conn.commit()
         print("Database schema migration checked successfully.")
     except Exception as e:

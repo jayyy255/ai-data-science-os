@@ -145,3 +145,51 @@ class MinIOStorage(StorageProvider):
                 os.remove(filepath)
                 return True
         return False
+
+    def generate_presigned_upload_url(self, filename: str) -> dict:
+        key = f"datasets/{filename}"
+        if self.client_enabled:
+            try:
+                url = self.s3.generate_presigned_url(
+                    ClientMethod='put_object',
+                    Params={'Bucket': self.bucket_name, 'Key': key},
+                    ExpiresIn=3600
+                )
+                return {
+                    "url": url,
+                    "method": "PUT",
+                    "fields": {},
+                    "s3_path": f"s3://{self.bucket_name}/{key}"
+                }
+            except Exception as e:
+                print(f"Failed generating MinIO presigned upload URL: {e}")
+        
+        # Fallback simulating direct upload URL pointing to the dev server upload endpoint
+        return {
+            "url": f"http://localhost:8000/api/projects/upload-local?filename={filename}",
+            "method": "POST",
+            "fields": {},
+            "s3_path": f"file://{os.path.abspath(os.path.join(self.local_fallback_dir, filename))}"
+        }
+
+    def generate_presigned_download_url(self, path: str) -> str:
+        if path.startswith("s3://"):
+            bucket_and_key = path[5:]
+            bucket, key = bucket_and_key.split("/", 1)
+            if self.client_enabled:
+                try:
+                    url = self.s3.generate_presigned_url(
+                        ClientMethod='get_object',
+                        Params={'Bucket': bucket, 'Key': key},
+                        ExpiresIn=3600
+                    )
+                    return url
+                except Exception as e:
+                    print(f"Failed generating MinIO presigned download URL: {e}")
+        
+        # Fallback to local files via proxy
+        if path.startswith("file://"):
+            filename = os.path.basename(path)
+            return f"http://localhost:8000/api/projects/download-local-file?filename={filename}"
+            
+        return path

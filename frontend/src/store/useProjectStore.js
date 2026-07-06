@@ -166,8 +166,9 @@ const defaultDemandProject = {
 
 export const useProjectStore = create((set, get) => ({
   projects: [],
-  activeProjectId: '',
+  activeProjectId: localStorage.getItem('aidso-active-project') || '',
   projectJobs: {},
+  chatHistories: {},
   currentUser: (() => {
     try {
       const stored = localStorage.getItem('aidso-user');
@@ -183,7 +184,7 @@ export const useProjectStore = create((set, get) => ({
     redis: { status: 'CONNECTED', url: 'redis://localhost:6379/0' },
     minio: { status: 'CONNECTED', endpoint: 'localhost:9000', accessKey: 'admin' },
     kafka: { status: 'CONNECTED', brokers: 'localhost:9092' },
-    gemini: { status: 'ACTIVE', apiKey: '', model: 'Gemini 1.5 Flash' },
+    gemini: { status: 'ACTIVE', apiKey: '', model: 'Gemini 2.5 Flash' },
     jwtSecret: ''
   },
   
@@ -194,9 +195,32 @@ export const useProjectStore = create((set, get) => ({
   },
 
   setActiveProjectId: (id) => {
+    localStorage.setItem('aidso-active-project', id);
     set({ activeProjectId: id });
     get().fetchProjectDetails(id);
     get().fetchProjectJobs(id);
+  },
+
+  getChatHistory: (projectId, projectName) => {
+    const state = get();
+    if (!state.chatHistories[projectId]) {
+      return [
+        {
+          sender: 'ai',
+          text: `Hello! I am your AIDSO Project Assistant. I have loaded the Knowledge Card for **${projectName}** into my prompt context. Ask me anything about the model selections, preprocessing decisions, or dataset metrics.`
+        }
+      ];
+    }
+    return state.chatHistories[projectId];
+  },
+
+  addChatMessage: (projectId, message) => {
+    set((state) => ({
+      chatHistories: {
+        ...state.chatHistories,
+        [projectId]: [...(state.chatHistories[projectId] || []), message]
+      }
+    }));
   },
 
   fetchProjectJobs: async (projectId) => {
@@ -351,7 +375,8 @@ export const useProjectStore = create((set, get) => ({
             reason: d.reason,
             confidence: d.confidence,
             overrideActive: d.override_active,
-            userChoice: d.user_choice
+            userChoice: d.user_choice,
+            comparisonMetrics: d.comparison_metrics_json
           })) : p.featureEngineeringDecisions;
 
           return {
@@ -394,7 +419,10 @@ export const useProjectStore = create((set, get) => ({
   },
 
   // Create Project API call
-  createProject: async (name, description, targetVariable, datasetName, datasetSize) => {
+  createProject: async (name, description, targetVariable, fileObject) => {
+    const datasetName = fileObject ? fileObject.name : "dataset.csv";
+    const datasetSize = fileObject ? `${(fileObject.size / (1024 * 1024)).toFixed(1)} MB` : "unknown size";
+    
     const localId = name.toLowerCase().replace(/\s+/g, '-');
     const newProject = {
       id: localId,
@@ -428,7 +456,7 @@ export const useProjectStore = create((set, get) => ({
       ],
       hpoTrials: [],
       timeline: [
-        { time: new Date().toLocaleTimeString(), title: 'Dataset Uploaded', desc: `${datasetName || 'dataset.csv'} (${datasetSize || 'unknown size'}) uploaded to MinIO.`, type: 'success' },
+        { time: new Date().toLocaleTimeString(), title: 'Dataset Uploaded', desc: `${datasetName} (${datasetSize}) uploaded to MinIO.`, type: 'success' },
         { time: new Date().toLocaleTimeString(), title: 'Project Initialized', desc: `Project structure initialized in PostgreSQL.`, type: 'info' }
       ],
       shapGlobal: [],
@@ -442,19 +470,36 @@ export const useProjectStore = create((set, get) => ({
     }));
 
     try {
+      const user = get().currentUser;
+      const fn = datasetName;
+      
+      // 1. Fetch presigned upload URL details
+      const presignedRes = await axios.post(`${API_BASE}/projects/presigned-upload-url`, { filename: fn });
+      const { url, method, s3_path } = presignedRes.data;
+      
+      // 2. Upload file directly to S3 / local simulation endpoint
+      const fileToUpload = fileObject || new File(["col1,col2\n1,2"], fn, { type: "text/csv" });
+      if (method === "PUT") {
+        await axios.put(url, fileToUpload, {
+          headers: { 'Content-Type': 'text/csv' }
+        });
+      } else {
+        const uploadForm = new FormData();
+        uploadForm.append('file', fileToUpload);
+        await axios.post(url, uploadForm, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      }
+
+      // 3. Register project via backend passing dataset_path
       const formData = new FormData();
       formData.append('name', name);
       formData.append('target_variable', targetVariable);
       formData.append('description', description);
-      
-      const user = get().currentUser;
+      formData.append('dataset_path', s3_path);
       if (user) {
         formData.append('username', user.username);
       }
-      
-      // Send empty mock file since file object is created/stored locally
-      const mockFile = new File(["col1,col2\n1,2"], datasetName || "dataset.csv", { type: "text/csv" });
-      formData.append('file', mockFile);
       
       const res = await axios.post(`${API_BASE}/projects`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
@@ -532,6 +577,20 @@ export const useProjectStore = create((set, get) => ({
       await get().fetchProjectDetails(projectId);
     } catch (err) {
       console.warn("Backend API not reachable. Kept local override.", err);
+    }
+  },
+
+  applyFeatureTransformation: async (projectId, featureName, transformation) => {
+    try {
+      const res = await axios.post(`${API_BASE}/projects/${projectId}/transform`, {
+        feature_name: featureName,
+        transformation: transformation
+      });
+      await get().fetchProjectDetails(projectId);
+      return res.data;
+    } catch (err) {
+      console.error("Failed to apply feature transformation:", err);
+      throw err;
     }
   },
 

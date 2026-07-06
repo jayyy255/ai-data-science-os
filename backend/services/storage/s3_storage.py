@@ -72,3 +72,29 @@ class S3Storage(StorageProvider):
                 print(f"S3 delete failed: {e}")
                 return False
         return False
+
+    def generate_presigned_upload_url(self, filename: str) -> dict:
+        key = f"datasets/{filename}"
+        url = self.client.generate_presigned_url(
+            ClientMethod='put_object',
+            Params={'Bucket': self.bucket_name, 'Key': key},
+            ExpiresIn=3600
+        )
+        return {
+            "url": url,
+            "method": "PUT",
+            "fields": {},
+            "s3_path": f"s3://{self.bucket_name}/{key}"
+        }
+
+    def generate_presigned_download_url(self, path: str) -> str:
+        if path.startswith("s3://"):
+            bucket_and_key = path[5:]
+            bucket, key = bucket_and_key.split("/", 1)
+            url = self.client.generate_presigned_url(
+                ClientMethod='get_object',
+                Params={'Bucket': bucket, 'Key': key},
+                ExpiresIn=3600
+            )
+            return url
+        return path

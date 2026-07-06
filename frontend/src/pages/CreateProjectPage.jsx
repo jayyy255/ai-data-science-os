@@ -53,8 +53,7 @@ export default function CreateProjectPage() {
       projectName,
       description,
       targetVariable,
-      file.name,
-      `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+      file
     );
 
     // Navigate back to overview of newly created project

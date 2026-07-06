@@ -73,10 +73,43 @@ export default function ModelRegistryPage() {
     );
   }
 
-  const handleDownload = (reg) => {
+  const handleDownload = async (reg) => {
     if (reg.status !== 'Training') {
       const API_BASE = window.location.origin.includes('localhost') ? 'http://localhost:8000/api' : '/api';
-      window.open(`${API_BASE}/projects/${project.id}/download-model?model_name=${encodeURIComponent(reg.algorithm)}`, '_blank');
+      try {
+        const response = await fetch(`${API_BASE}/projects/${project.id}/presigned-download-model?model_name=${encodeURIComponent(reg.algorithm)}`);
+        if (!response.ok) throw new Error("Failed to fetch signed download url");
+        const data = await response.json();
+        
+        // Fetch as blob in background to hide signed URL from browser address bar
+        const fileRes = await fetch(data.url);
+        const blob = await fileRes.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = blobUrl;
+        
+        // Format download filename
+        const dataset_name = project.dataset_path ? project.dataset_path.split('/').pop().replace('.csv', '') : 'dataset';
+        const proj_slug = project.name.replace(/\s+/g, '_');
+        const m_name_slug = reg.algorithm.toLowerCase().replace(/\s+/g, '_');
+        const filename = `${proj_slug}_${dataset_name}_${m_name_slug}.pkl`.replace(/[^a-zA-Z0-9_\-\.]/g, '');
+        
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(blobUrl);
+        a.remove();
+      } catch (err) {
+        console.warn("Presigned download url fetch/CORS block. Falling back to backend stream:", err);
+        // Fallback: download directly from backend streaming proxy
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = `${API_BASE}/projects/${project.id}/download-model?model_name=${encodeURIComponent(reg.algorithm)}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
     } else {
       alert('This model is currently training.');
     }

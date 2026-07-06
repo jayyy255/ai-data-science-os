@@ -15,6 +15,24 @@ def main():
     db_session_maker = SessionLocal
     training_pipeline = TrainingWorker(db_session_maker=db_session_maker)
     
+    # Clean up any stuck 'running' jobs from prior crashes/restarts
+    db_cleanup = db_session_maker()
+    try:
+        stuck_jobs = db_cleanup.query(TrainingJob).filter(TrainingJob.status == 'running').all()
+        for j in stuck_jobs:
+            j.status = 'failed'
+            j.completed_at = datetime.utcnow()
+            p = db_cleanup.query(Project).filter(Project.id == j.project_id).first()
+            if p:
+                p.status = 'Failed'
+        db_cleanup.commit()
+        if len(stuck_jobs) > 0:
+            print(f"Cleaned up {len(stuck_jobs)} stuck running jobs on startup.")
+    except Exception as cleanup_err:
+        print(f"Error cleaning up stuck jobs: {cleanup_err}")
+    finally:
+        db_cleanup.close()
+        
     while True:
         db = db_session_maker()
         try:

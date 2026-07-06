@@ -15,6 +15,7 @@ class Project(Base):
     username = Column(String, ForeignKey('users.username', ondelete='CASCADE'), nullable=True)
     status = Column(String, default='Created')  # Created, EDA, Preprocessed, Training, Ready
     dataset_path = Column(String, nullable=True)
+    eda_profile_json = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -35,6 +36,7 @@ class DecisionMemory(Base):
     confidence = Column(Float, nullable=False)
     override_active = Column(Boolean, default=False)
     user_choice = Column(String, nullable=True)
+    comparison_metrics_json = Column(JSON, nullable=True)
 
     project = relationship("Project", back_populates="decisions")
 

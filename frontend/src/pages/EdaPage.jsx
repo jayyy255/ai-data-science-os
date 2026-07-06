@@ -9,9 +9,35 @@ export default function EdaPage() {
   const [activeTab, setActiveTab] = useState('distributions');
   const [selectedImputation, setSelectedImputation] = useState('KNN');
 
-  const handleDownloadImputed = () => {
+  const handleDownloadImputed = async () => {
     const API_BASE = window.location.origin.includes('localhost') ? 'http://localhost:8000/api' : '/api';
-    window.open(`${API_BASE}/projects/${project.id}/download-dataset?imputation_method=${selectedImputation}`, '_blank');
+    try {
+      const response = await fetch(`${API_BASE}/projects/${project.id}/presigned-download-dataset?imputation_method=${selectedImputation}`);
+      if (!response.ok) throw new Error("Failed to fetch signed dataset url");
+      const data = await response.json();
+      
+      // Fetch as blob in background to hide signed URL from browser address bar
+      const fileRes = await fetch(data.url);
+      const blob = await fileRes.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = blobUrl;
+      a.download = `${project.id}_imputed_${selectedImputation.toLowerCase()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(blobUrl);
+      a.remove();
+    } catch (err) {
+      console.warn("Presigned dataset download failed/CORS block. Falling back to backend stream:", err);
+      // Fallback: download directly from backend streaming proxy
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = `${API_BASE}/projects/${project.id}/download-dataset?imputation_method=${selectedImputation}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
   };
 
   // Parse dynamic feature distributions
