@@ -38,7 +38,7 @@ backend/*.csv
 *.csv
 
 # System Documentation
-SYSTEM.docx
+SYSTEM*.docx
 
 
 tmp/
