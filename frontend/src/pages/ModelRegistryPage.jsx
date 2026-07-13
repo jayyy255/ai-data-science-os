@@ -49,33 +49,37 @@ export default function ModelRegistryPage() {
     });
   }
 
-  // Fallback to static mock list if no models have been touched yet
+  const isDefaultProject = project.id === 'churn-prediction' || project.id === 'demand-forecasting';
+
+  // Fallback to static mock list if no models have been touched yet and we are on a default seeded project
   if (registryVersions.length === 0) {
-    registryVersions.push(
-      {
-        version: 'v3',
-        algorithm: 'XGBoost',
-        status: 'Production',
-        metricVal: '0.9130',
-        path: 's3://models/customer-churn/v3.bin',
-        created: '2 hours ago',
-        metrics: { accuracy: '89.2%', logloss: '0.23' }
-      },
-      {
-        version: 'v4',
-        algorithm: 'LightGBM',
-        status: 'Staging',
-        metricVal: '0.9020',
-        path: 's3://models/customer-churn/v4.bin',
-        created: '1 day ago',
-        metrics: { accuracy: '88.5%', logloss: '0.26' }
-      }
-    );
+    if (isDefaultProject) {
+      registryVersions.push(
+        {
+          version: 'v3',
+          algorithm: 'XGBoost',
+          status: 'Production',
+          metricVal: '0.9130',
+          path: 's3://models/customer-churn/v3.bin',
+          created: '2 hours ago',
+          metrics: { accuracy: '89.2%', logloss: '0.23' }
+        },
+        {
+          version: 'v4',
+          algorithm: 'LightGBM',
+          status: 'Staging',
+          metricVal: '0.9020',
+          path: 's3://models/customer-churn/v4.bin',
+          created: '1 day ago',
+          metrics: { accuracy: '88.5%', logloss: '0.26' }
+        }
+      );
+    }
   }
 
   const handleDownload = async (reg) => {
     if (reg.status !== 'Training') {
-      const API_BASE = window.location.origin.includes('localhost') ? 'http://localhost:8000/api' : '/api';
+      const API_BASE = '/api';
       try {
         const response = await fetch(`${API_BASE}/projects/${project.id}/presigned-download-model?model_name=${encodeURIComponent(reg.algorithm)}`);
         if (!response.ok) throw new Error("Failed to fetch signed download url");
@@ -102,13 +106,12 @@ export default function ModelRegistryPage() {
         a.remove();
       } catch (err) {
         console.warn("Presigned download url fetch/CORS block. Falling back to backend stream:", err);
-        // Fallback: download directly from backend streaming proxy
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = `${API_BASE}/projects/${project.id}/download-model?model_name=${encodeURIComponent(reg.algorithm)}`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        // Fallback: download directly from backend streaming proxy using hidden iframe to prevent page navigation
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = `${API_BASE}/projects/${project.id}/download-model?model_name=${encodeURIComponent(reg.algorithm)}`;
+        document.body.appendChild(iframe);
+        setTimeout(() => iframe.remove(), 5000);
       }
     } else {
       alert('This model is currently training.');

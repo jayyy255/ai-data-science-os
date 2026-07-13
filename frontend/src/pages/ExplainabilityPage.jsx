@@ -9,6 +9,30 @@ export default function ExplainabilityPage() {
 
   const [explainTab, setExplainTab] = useState('global');
   const [searchId, setSearchId] = useState('US-8594-QD');
+  
+  const isDefaultProject = project.id === 'churn-prediction' || project.id === 'demand-forecasting';
+
+  if (project.status !== 'Ready for Deployment' && !isDefaultProject) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-display font-bold text-white tracking-tight">Explainability Engine (SHAP)</h1>
+          <p className="text-sm text-zinc-400">Interpret global feature impact and local inference predictions in real-time.</p>
+        </div>
+        <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-4">
+          <div className="p-4 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400">
+            <Eye className="w-8 h-8 animate-pulse" />
+          </div>
+          <div className="space-y-1.5 max-w-sm">
+            <h3 className="text-zinc-200 font-bold text-base">Explainability Engine is Offline</h3>
+            <p className="text-xs text-zinc-500 leading-relaxed">
+              SHAP global importance plots and local inference predictions become active once a model is trained and registered for production.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Custom colors for SHAP: violet for positive (pushing target probability up), zinc for negative (reducing target probability)
   const getShapColor = (val) => (val > 0 ? '#7c3aed' : '#71717a');

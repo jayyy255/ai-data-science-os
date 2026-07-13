@@ -5,16 +5,11 @@ import axios from 'axios';
 
 
 export default function AiAssistantPage() {
-  const { getActiveProject } = useProjectStore();
+  const { getActiveProject, getChatHistory, addChatMessage } = useProjectStore();
   const project = getActiveProject();
 
   const [inputMsg, setInputMsg] = useState('');
-  const [messages, setMessages] = useState([
-    {
-      sender: 'ai',
-      text: `Hello! I am your AIDSO Project Assistant. I have loaded the Knowledge Card for **${project.name}** into my prompt context. Ask me anything about the model selections, preprocessing decisions, or dataset metrics.`
-    }
-  ]);
+  const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
@@ -26,6 +21,10 @@ export default function AiAssistantPage() {
   ];
 
   useEffect(() => {
+    setMessages(getChatHistory(project.id, project.name));
+  }, [project.id, project.name, getChatHistory]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
@@ -35,47 +34,27 @@ export default function AiAssistantPage() {
     // Add user message
     const userMsg = { sender: 'user', text: textToSend };
     setMessages(prev => [...prev, userMsg]);
+    addChatMessage(project.id, userMsg);
     setInputMsg('');
     setLoading(true);
 
     try {
-      const API_BASE = window.location.origin.includes('localhost') ? 'http://localhost:8000/api' : '/api';
+      const API_BASE = '/api';
       const res = await axios.post(`${API_BASE}/projects/${project.id}/chat`, {
         question: textToSend
       });
       let responseText = res.data.answer;
-      if (responseText && (responseText.includes("Error interacting with Gemini API") || responseText.includes("API key not valid"))) {
-        responseText = "Sorry for the inconvenience, the AI is unavailable right now. It shall be back shortly.";
-      }
-      setMessages(prev => [...prev, { sender: 'ai', text: responseText }]);
+      
+      const aiMsg = { sender: 'ai', text: responseText };
+      setMessages(prev => [...prev, aiMsg]);
+      addChatMessage(project.id, aiMsg);
       setLoading(false);
     } catch (err) {
       console.warn("Backend API chat failed.", err);
-      // Simulate AI response based on questions
-      setTimeout(() => {
-        let aiText = `I analyzed the Project Memory for ${project.name}. `;
-        const query = textToSend.toLowerCase();
-
-        if (query.includes('xgboost') || query.includes('model') || query.includes('selected')) {
-          aiText += `**XGBoost** was selected as the champion model with **94% confidence** in HPO Trial #46. Rationale: tabular dataset with mixed numeric and high-cardinality categorical features. In comparative trials, XGBoost achieved an F1 validation score of **0.913** vs. **0.865** for Random Forest.`;
-        } else if (query.includes('preprocess') || query.includes('imput') || query.includes('feature')) {
-          aiText += `The following preprocessing operations were applied:
-1. **Median Imputation** on \`tenure\` (91% confidence) due to outliers.
-2. **One-Hot Encoding** on \`payment_method\` (95% confidence) due to low cardinality (4 categories).
-3. **Standard Scaling** on \`MonthlyCharges\` (88% confidence).
-4. **User Override**: The scaling strategy for \`support_calls\` was manually overridden to **Keep Raw Count** (15% difference in feature correlation).`;
-        } else if (query.includes('influence') || query.includes('feature') || query.includes('shap')) {
-          aiText += `According to the SHAP Global Explanations:
-- **tenure** has the strongest negative impact (longer tenure reduces churn probability).
-- **MonthlyCharges** has a positive impact (higher charges increase churn probability).
-- **support_calls** has a positive impact (exceeding 4 calls represents a 74% likelihood threshold).`;
-        } else {
-          aiText += `Based on the registered Level 1 and Level 2 Knowledge Cards, the dataset contains **${project.rowsCount?.toLocaleString()} rows** and **${project.columnsCount} features** with **${project.missingValuesPct}% missing values**. Currently, the project is **${project.status}** with a best F1 score of **${project.bestF1 || 'N/A'}** using **${project.bestModel}**. Let me know if you would like me to trigger retraining.`;
-        }
-
-        setMessages(prev => [...prev, { sender: 'ai', text: aiText }]);
-        setLoading(false);
-      }, 1000);
+      const errMsg = { sender: 'ai', text: "Failed to connect to AI Assistant. Please check if your backend container is running and contains a valid GEMINI_API_KEY in the environment." };
+      setMessages(prev => [...prev, errMsg]);
+      addChatMessage(project.id, errMsg);
+      setLoading(false);
     }
   };
 

@@ -167,6 +167,7 @@ export default function LoginPage() {
                   <Mail className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
                   <input
                     type="email"
+                    id="forgot-email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full bg-brand-dark-bg/60 border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2.5 pl-10 pr-4 rounded-xl text-sm font-medium transition-all"
@@ -178,6 +179,7 @@ export default function LoginPage() {
 
               <button
                 type="submit"
+                id="forgot-submit"
                 disabled={loading}
                 className="w-full bg-brand-primary hover:bg-brand-primary-hover py-2.5 rounded-xl text-sm font-bold text-white transition-all cursor-pointer shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2 disabled:opacity-60"
               >
@@ -205,6 +207,7 @@ export default function LoginPage() {
                     <User className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
                     <input
                       type="text"
+                      id="signup-fullname"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       className="w-full bg-brand-dark-bg/60 border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2.5 pl-10 pr-4 rounded-xl text-sm font-medium transition-all"
@@ -223,6 +226,7 @@ export default function LoginPage() {
                     <User className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
                     <input
                       type="text"
+                      id="signup-username"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       className="w-full bg-brand-dark-bg/60 border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2.5 pl-10 pr-4 rounded-xl text-sm font-medium transition-all"
@@ -241,6 +245,7 @@ export default function LoginPage() {
                     <Mail className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
                     <input
                       type="text"
+                      id="login-identity"
                       value={identity}
                       onChange={(e) => setIdentity(e.target.value)}
                       className="w-full bg-brand-dark-bg/60 border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2.5 pl-10 pr-4 rounded-xl text-sm font-medium transition-all"
@@ -259,6 +264,7 @@ export default function LoginPage() {
                     <Mail className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
                     <input
                       type="email"
+                      id="signup-email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full bg-brand-dark-bg/60 border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2.5 pl-10 pr-4 rounded-xl text-sm font-medium transition-all"
@@ -276,6 +282,7 @@ export default function LoginPage() {
                   {!isSignup && (
                     <button
                       type="button"
+                      id="toggle-forgot-password"
                       onClick={() => { setIsForgotPassword(true); setErrorMsg(''); setSuccessMsg(''); }}
                       className="text-xs text-violet-400 hover:underline bg-transparent border-none cursor-pointer focus:outline-none"
                     >
@@ -287,6 +294,7 @@ export default function LoginPage() {
                   <KeyRound className="absolute left-3.5 top-3 w-4 h-4 text-zinc-500" />
                   <input
                     type="password"
+                    id={isSignup ? "signup-password" : "login-password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full bg-brand-dark-bg/60 border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2.5 pl-10 pr-4 rounded-xl text-sm font-medium transition-all"
@@ -298,6 +306,7 @@ export default function LoginPage() {
               {/* Submit Button */}
               <button
                 type="submit"
+                id="auth-submit"
                 disabled={loading}
                 className="w-full bg-brand-primary hover:bg-brand-primary-hover py-2.5 rounded-xl text-sm font-bold text-white transition-all cursor-pointer shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2 disabled:opacity-60"
               >
@@ -309,6 +318,7 @@ export default function LoginPage() {
                 {isSignup ? 'Already have an account? ' : "Don't have an account? "}
                 <button
                   type="button"
+                  id="toggle-auth-mode"
                   onClick={() => toggleMode(!isSignup)}
                   className="text-violet-400 font-semibold hover:underline bg-transparent border-none cursor-pointer focus:outline-none"
                 >

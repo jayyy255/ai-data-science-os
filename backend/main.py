@@ -26,8 +26,20 @@ with engine.connect() as conn:
         conn.execute(text("ALTER TABLE decision_memory ADD COLUMN IF NOT EXISTS comparison_metrics_json JSON;"))
         conn.commit()
         print("Database schema migration checked successfully.")
+        
+        # Seed dummy user: dummy_user / dummy@aidso.ai / password123
+        import bcrypt
+        cursor = conn.execute(text("SELECT username FROM users WHERE username = 'dummy_user';")).fetchone()
+        if not cursor:
+            hashed = bcrypt.hashpw("password123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            conn.execute(text(
+                "INSERT INTO users (full_name, username, email, password_hash) "
+                "VALUES ('Demo Dummy Account', 'dummy_user', 'dummy@aidso.ai', :pw_hash);"
+            ), {"pw_hash": hashed})
+            conn.commit()
+            print("Seeded 'dummy_user' account successfully.")
     except Exception as e:
-        print(f"Database migration columns exception: {e}")
+        print(f"Database migration columns / seeding exception: {e}")
 
 app = FastAPI(title="AIDSO Backend API", version="1.0.0")
 

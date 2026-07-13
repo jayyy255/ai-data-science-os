@@ -35,7 +35,7 @@ export default function FeatureEngineeringPage() {
 
   const handleDownloadTransformed = async () => {
     setDownloadingTransformed(true);
-    const API_BASE = window.location.origin.includes('localhost') ? 'http://localhost:8000/api' : '/api';
+    const API_BASE = '/api';
     try {
       const res = await fetch(`${API_BASE}/projects/${project.id}/presigned-download-transformed`);
       if (!res.ok) throw new Error("Failed to get presigned URL");
@@ -54,13 +54,12 @@ export default function FeatureEngineeringPage() {
       a.remove();
     } catch (err) {
       console.warn("Signed URL download failed/CORS block. Falling back to backend stream:", err);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = `${API_BASE}/projects/${project.id}/download-transformed`;
-      a.download = `${project.id}_transformed_dataset.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      // Fallback: download directly from backend streaming proxy using hidden iframe to prevent page navigation
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = `${API_BASE}/projects/${project.id}/download-transformed`;
+      document.body.appendChild(iframe);
+      setTimeout(() => iframe.remove(), 5000);
     } finally {
       setDownloadingTransformed(false);
     }

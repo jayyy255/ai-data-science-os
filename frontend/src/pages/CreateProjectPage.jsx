@@ -51,9 +51,11 @@ export default function CreateProjectPage() {
     // Create the project in the store
     createProject(
       projectName,
-      description,
       targetVariable,
-      file
+      description,
+      file,
+      file.name,
+      (file.size / (1024 * 1024)).toFixed(2) + ' MB'
     );
 
     // Navigate back to overview of newly created project
@@ -85,6 +87,7 @@ export default function CreateProjectPage() {
             <label className="text-xs font-medium text-zinc-400">Project Name</label>
             <input
               type="text"
+              id="project-name"
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
               className="w-full bg-brand-dark-bg/60 border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2 px-3 rounded-xl text-sm font-medium transition-all"
@@ -97,6 +100,7 @@ export default function CreateProjectPage() {
             <label className="text-xs font-medium text-zinc-400">Target Variable Column</label>
             <input
               type="text"
+              id="target-variable"
               value={targetVariable}
               onChange={(e) => setTargetVariable(e.target.value)}
               className="w-full bg-brand-dark-bg/60 border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2 px-3 rounded-xl text-sm font-medium transition-all font-mono"
@@ -111,6 +115,7 @@ export default function CreateProjectPage() {
           <label className="text-xs font-medium text-zinc-400">Business Problem Description</label>
           <textarea
             value={description}
+            id="project-description"
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
             className="w-full bg-brand-dark-bg/60 border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2 px-3 rounded-xl text-sm font-medium transition-all leading-relaxed"
@@ -124,6 +129,7 @@ export default function CreateProjectPage() {
           <div className="border-2 border-dashed border-brand-dark-border hover:border-violet-500/40 rounded-xl p-8 flex flex-col items-center justify-center text-center bg-brand-dark-bg/30 relative">
             <input
               type="file"
+              id="dataset-upload"
               accept=".csv"
               onChange={handleFileChange}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -199,6 +205,7 @@ export default function CreateProjectPage() {
             </Link>
             <button
               type="submit"
+              id="project-submit"
               disabled={!file || uploading}
               className={`
                 px-5 py-2 rounded-xl text-xs font-bold text-white transition-all shadow-lg cursor-pointer

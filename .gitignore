@@ -36,3 +36,11 @@ Thumbs.db
 # Uploaded testing datasets
 backend/*.csv
 *.csv
+
+# System Documentation
+SYSTEM.docx
+
+
+tmp/
+
+E:\code\projects\ai-data-science-os\tmp

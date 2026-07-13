@@ -10,7 +10,7 @@ export default function EdaPage() {
   const [selectedImputation, setSelectedImputation] = useState('KNN');
 
   const handleDownloadImputed = async () => {
-    const API_BASE = window.location.origin.includes('localhost') ? 'http://localhost:8000/api' : '/api';
+    const API_BASE = '/api';
     try {
       const response = await fetch(`${API_BASE}/projects/${project.id}/presigned-download-dataset?imputation_method=${selectedImputation}`);
       if (!response.ok) throw new Error("Failed to fetch signed dataset url");
@@ -30,13 +30,12 @@ export default function EdaPage() {
       a.remove();
     } catch (err) {
       console.warn("Presigned dataset download failed/CORS block. Falling back to backend stream:", err);
-      // Fallback: download directly from backend streaming proxy
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = `${API_BASE}/projects/${project.id}/download-dataset?imputation_method=${selectedImputation}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      // Fallback: download directly from backend streaming proxy using hidden iframe to prevent page navigation
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = `${API_BASE}/projects/${project.id}/download-dataset?imputation_method=${selectedImputation}`;
+      document.body.appendChild(iframe);
+      setTimeout(() => iframe.remove(), 5000);
     }
   };
 

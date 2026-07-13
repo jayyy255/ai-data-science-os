@@ -168,3 +168,30 @@ Once the production MVP is stable, offload event-driven operations to AWS Lambda
 *   **S3 Triggers**: Trigger a Lambda function on S3 dataset uploads to validate structure, run null check statistics, and save data health metadata to the database.
 *   **Post-Training Triggers**: Trigger a Lambda function on model artifact saves to compile explainability metrics and format reports.
 *   **Cron Cleanup**: Run daily Lambdas to delete expired temporary report files and purge inactive guest sessions.
+
+---
+
+## 3. Local Verification & Demo Guide
+
+To verify the robust, non-dummy local implementation of AIDSO, follow this walkthrough:
+
+### 3.1 Demo Account vs. Clean Isolation
+*   **The Demo Account**: Log in to the application using:
+    *   **Username**: `dummy_user`
+    *   **Password**: `password123`
+    *   *Result*: This user gets pre-populated with two dynamic workspace projects: **Customer Churn Prediction** and **Retail Demand Forecasting**. Navigating these projects displays full SHAP explainability charts, model registry lineages, downloadable binaries, and population drift diagnostics.
+*   **Clean Isolation**: Register a new user (e.g., `real_developer`).
+    *   *Result*: The workspace is initially clean and displays 0 projects.
+    *   Creating a new project will display clean premium offline / idle states on **Explainability**, **Monitoring**, and **Model Registry** until a training job completes. No static or synthetic default charts are shown.
+
+### 3.2 Authentication Validation & Password Reset
+*   **Credentials Check**: Attempt to sign in with an invalid password. The backend checks the hashed database record with `bcrypt` and returns a secure `401 Unauthorized` warning alert.
+*   **Forgot Password**: Click "Forgot password?" and submit the user's email. The backend resets the database record password to `reset12345` and securely returns it in a UI toast. You can log in immediately using this temporary password.
+
+### 3.3 calculated Workings
+*   **Dynamic KNN Imputation**: Under **EDA -> Dataset Imputation**, selecting a method (e.g. KNN) runs a real mathematical `sklearn.impute.KNNImputer` over the numeric column vectors in the dataset and saves the values.
+*   **Pearson Correlation Delta**: Under **Feature Engineering**, selecting a column transformation (e.g. Standard Scaling or One-Hot Encoding) calculates the Pearson correlation coefficient between the transformed feature and the target variable, displaying the exact computed delta value under "Transformation Impact Analysis".
+*   **SPA State Preservation (Iframe Downloads)**: Download links for datasets or models fetch the files as binary Blobs via Axios in the background. In case of CORS or connection blocks, the downloader falls back to a hidden `<iframe>` targeting the streaming proxy, ensuring the user is never redirected away from the Single-Page Application (SPA) and preserving sidebar layout states.
+*   **Training HPO Progress**: Triggering training enqueues a job polled by the python worker. The worker increments the database status, which triggers a smooth transition progress bar in the React UI.
+*   **Grounded AI Assistant Persistent History**: The grounding chat assistant uses Gemini API (`gemini-2.5-flash`) to generate contextual answers based on the Knowledge Card. Zustand state mappings preserve chat history across project tabs, meaning navigating away and returning to the AI Assistant tab preserves the conversation.
+

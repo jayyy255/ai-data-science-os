@@ -191,7 +191,21 @@ export const useProjectStore = create((set, get) => ({
   // Get currently active project
   getActiveProject: () => {
     const state = get();
-    return state.projects.find(p => p.id === state.activeProjectId) || defaultChurnProject;
+    return state.projects.find(p => p.id === state.activeProjectId) || {
+      id: '',
+      name: '',
+      targetVariable: '',
+      problemType: '',
+      description: '',
+      status: '',
+      features: [],
+      featureEngineeringDecisions: [],
+      timeline: [],
+      hpoTrials: [],
+      shapGlobal: [],
+      shapLocal: { customerId: '', probability: 0, risk: '', drivers: [] },
+      monitoring: { driftPsi: 0, driftStatus: '', driftAlerts: [] }
+    };
   },
 
   setActiveProjectId: (id) => {
@@ -279,7 +293,8 @@ export const useProjectStore = create((set, get) => ({
       }
     }
     localStorage.removeItem('aidso-user');
-    set({ currentUser: null });
+    localStorage.removeItem('aidso-active-project');
+    set({ currentUser: null, activeProjectId: '' });
   },
   forgotPassword: async (email) => {
     try {
@@ -310,21 +325,21 @@ export const useProjectStore = create((set, get) => ({
         status: p.status,
         bestModel: 'None',
         bestF1: null,
-        rowsCount: 1000,
-        columnsCount: 10,
-        missingValuesPct: 1.5,
+        rowsCount: p.eda_profile_json?.rows_count || 0,
+        columnsCount: p.eda_profile_json?.columns_count || 0,
+        missingValuesPct: p.eda_profile_json?.missing_pct || 0,
         balancingMethod: 'None',
         modelsTestedCount: 0,
         topFeatures: [],
-        structure: { numerical: 6, categorical: 4, datetime: 0, text: 0 },
-        qualityHealth: {
-          missingValues: '1.5% missing',
+        structure: p.eda_profile_json?.structure || { numerical: 0, categorical: 0, datetime: 0, text: 0 },
+        qualityHealth: p.eda_profile_json?.quality_health || {
+          missingValues: '0% missing',
           duplicates: '0 duplicates',
           outliers: 'None',
           classImbalance: 'None',
           invalidDataTypes: '0 invalid data types',
         },
-        features: [
+        features: p.eda_profile_json?.features || [
           { name: p.target_variable, type: 'int64', missing: 0, unique: 2, sample: '0', quality: 'Target' }
         ],
         featureEngineeringDecisions: [],
@@ -332,14 +347,23 @@ export const useProjectStore = create((set, get) => ({
         timeline: [],
         shapGlobal: [],
         shapLocal: { customerId: 'N/A', probability: 0, risk: 'Normal', drivers: [] },
-        monitoring: { driftPsi: 0, driftStatus: 'HEALTHY', driftAlerts: [] }
       }));
       
-      set({ projects: apiProjects });
+      let finalProjects = [...apiProjects];
+      if (user && user.username === 'dummy_user') {
+        if (!finalProjects.some(p => p.id === 'churn-prediction')) {
+          finalProjects.push(defaultChurnProject);
+        }
+        if (!finalProjects.some(p => p.id === 'demand-forecasting')) {
+          finalProjects.push(defaultDemandProject);
+        }
+      }
+      
+      set({ projects: finalProjects });
 
       // Sync active project details if it's in the list
       const activeId = get().activeProjectId;
-      if (apiProjects.some(p => p.id === activeId)) {
+      if (finalProjects.some(p => p.id === activeId)) {
         get().fetchProjectDetails(activeId);
       }
     } catch (err) {

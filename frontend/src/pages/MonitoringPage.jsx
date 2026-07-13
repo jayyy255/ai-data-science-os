@@ -30,6 +30,29 @@ export default function MonitoringPage() {
   const project = getActiveProject();
 
   const isDrift = project.monitoring?.driftStatus === 'DRIFT DETECTED';
+  const isDefaultProject = project.id === 'churn-prediction' || project.id === 'demand-forecasting';
+
+  if (project.status !== 'Ready for Deployment' && !isDefaultProject) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-display font-bold text-white tracking-tight">Model Monitoring & Drift</h1>
+          <p className="text-sm text-zinc-400">Track population stability indexes and decay stats in production.</p>
+        </div>
+        <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-4">
+          <div className="p-4 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400">
+            <Activity className="w-8 h-8 animate-pulse" />
+          </div>
+          <div className="space-y-1.5 max-w-sm">
+            <h3 className="text-zinc-200 font-bold text-base">Monitoring is Offline</h3>
+            <p className="text-xs text-zinc-500 leading-relaxed">
+              Population stability index tracking and model performance decay diagnostics become active once a model is trained and registered for production.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
