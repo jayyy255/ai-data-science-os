@@ -1,445 +1,134 @@
+"""Database-worker training pipeline. No synthetic data or fabricated metrics."""
+import io
 import os
-import json
-import time
-import threading
+import pickle
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.preprocessing import LabelEncoder
+from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, mean_squared_error
+from sklearn.metrics import f1_score, accuracy_score, mean_squared_error
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
+from services.preprocessing import build_preprocessor, clean_frame
 
-class TabularTransformer:
-    def __init__(self, problem_type='classification', random_state=42):
-        self.problem_type = problem_type
-        self.random_state = random_state
-        if problem_type == 'classification':
-            self.model = MLPClassifier(hidden_layer_sizes=(32, 16), max_iter=100, random_state=random_state)
-        else:
-            self.model = MLPRegressor(hidden_layer_sizes=(32, 16), max_iter=100, random_state=random_state)
-            
-    def _attention_transform(self, X):
-        X_arr = np.array(X)
-        n_samples, n_features = X_arr.shape
-        np.random.seed(self.random_state)
-        W_q = np.random.randn(n_features, min(8, n_features))
-        W_k = np.random.randn(n_features, min(8, n_features))
-        W_v = np.random.randn(n_features, n_features)
-        
-        Q = np.dot(X_arr, W_q)
-        K = np.dot(X_arr, W_k)
-        scores = np.dot(Q, K.T) / np.sqrt(Q.shape[1] if Q.shape[1] > 0 else 1)
-        
-        # Softmax over columns
-        scores_exp = np.exp(scores - np.max(scores, axis=-1, keepdims=True))
-        A = scores_exp / np.sum(scores_exp, axis=-1, keepdims=True)
-        V = np.dot(X_arr, W_v)
-        out = np.dot(A, V)
-        return out
-        
+class EncodedClassifier(ClassifierMixin, BaseEstimator):
+    def __init__(self, estimator): self.estimator = estimator
     def fit(self, X, y):
-        X_trans = self._attention_transform(X)
-        self.model.fit(X_trans, y)
+        self.encoder_ = LabelEncoder().fit(y)
+        self.classes_ = self.encoder_.classes_
+        self.estimator.fit(X, self.encoder_.transform(y))
         return self
-        
-    def predict(self, X):
-        X_trans = self._attention_transform(X)
-        return self.model.predict(X_trans)
-
-    @property
-    def feature_importances_(self):
-        # Fallback helper for feature importance
-        if hasattr(self.model, "coefs_"):
-            return np.abs(self.model.coefs_[0]).sum(axis=1)
-        return np.ones(8) / 8
+    def predict(self, X): return self.encoder_.inverse_transform(self.estimator.predict(X).astype(int))
+    def predict_proba(self, X): return self.estimator.predict_proba(X)
 
 class TrainingWorker:
-    def __init__(self, db_session_maker=None):
-        self.db_session_maker = db_session_maker
-        self.kafka_brokers = os.getenv("KAFKA_BROKERS", "localhost:9092")
-        self.running = False
-        self.worker_thread = None
-
-    def start(self):
-        self.running = True
-        self.worker_thread = threading.Thread(target=self._run_loop, daemon=True)
-        self.worker_thread.start()
-        print("Kafka Training Pipeline Worker Thread Started.")
-
-    def stop(self):
-        self.running = False
-        if self.worker_thread:
-            self.worker_thread.join(timeout=2.0)
-            print("Kafka Training Pipeline Worker Thread Stopped.")
-
-    def _run_loop(self):
-        while self.running:
-            # Mock poll for training requests in this worker loop
-            time.sleep(1.0)
-
+    def __init__(self, db_session_maker=None): self.db_session_maker = db_session_maker
     def update_models_comparison_db(self, project_id, comparison):
-        if self.db_session_maker:
-            db = self.db_session_maker()
-            try:
-                from database.models import KnowledgeCard
-                card = db.query(KnowledgeCard).filter(KnowledgeCard.project_id == project_id).first()
-                if card:
-                    card.models_comparison_json = comparison
-                    db.commit()
-            except Exception as e:
-                print(f"Error updating models comparison in DB: {e}")
-            finally:
-                db.close()
+        from database.models import KnowledgeCard
+        with self.db_session_maker() as db:
+            card = db.query(KnowledgeCard).filter_by(project_id=project_id).first()
+            if card:
+                card.models_comparison_json = comparison.copy()
+                db.commit()
 
-    def process_training_job(self, project_id: str, target: str, problem_type: str, imputation_method: str = "Median", features_override: list = None):
-        """
-        Runs the full Optuna HPO + MLflow + SHAP calculations pipeline on the actual dataset.
-        """
-        import xgboost as xgb
-        import lightgbm as lgb
-        import optuna
-        import shap
-        import mlflow
-        import io
-        import pickle
+    def process_training_job(self, project_id, target, problem_type, imputation_method='Median', features_override=None):
+        from database.models import Project, DecisionMemory
         from services.storage.factory import get_storage_provider
-
-        print(f"Starting pipeline training job for project: {project_id} with imputation: {imputation_method}")
-        
-        # 1. Initialize MLflow tracking
-        mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
-        mlflow.set_experiment(f"aidso-{project_id}")
-
-        # Try to load the real dataset from MinIO
-        loaded_real = False
+        import optuna
+        storage = get_storage_provider()
+        with self.db_session_maker() as db:
+            project = db.query(Project).filter_by(id=project_id).first()
+            if not project or not project.dataset_path: raise ValueError('Uploaded dataset is missing')
+            data = storage.download_file(project.dataset_path)
+            choices = {d.feature_name: d.user_choice if d.override_active else d.decision for d in db.query(DecisionMemory).filter_by(project_id=project_id).all()}
+        frame = clean_frame(pd.read_csv(io.BytesIO(data)))
+        if target not in frame: raise ValueError(f'Target column {target} is missing')
+        frame = frame.dropna(subset=[target])
+        if len(frame) < 12: raise ValueError('Training requires at least 12 rows with non-missing targets')
+        X, y = frame.drop(columns=[target]), frame[target]
+        classification = problem_type == 'classification'
+        if X.shape[1] == 0: raise ValueError('Training requires at least one predictor')
+        stratify = None
+        if classification:
+            counts = y.value_counts()
+            if len(counts) < 2 or counts.min() < 3: raise ValueError('Classification requires at least 3 rows in every class')
+            stratify = y
+        # Separate untouched test data from the validation rows used for hyperparameter search.
+        test_size = max(.2, y.nunique()/len(y)) if classification else .2
+        if test_size > .4: raise ValueError('Too many classes for this dataset size')
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42, stratify=stratify)
+        X_fit, X_val, y_fit, y_val = train_test_split(X_train, y_train, test_size=max(.25, y_train.nunique()/len(y_train)) if classification else .25, random_state=43, stratify=y_train if classification else None)
+        def metric(actual, predictions):
+            return float(f1_score(actual, predictions, average='weighted', zero_division=0)) if classification else float(mean_squared_error(actual, predictions))
+        def pipeline(estimator):
+            if classification: estimator = EncodedClassifier(estimator)
+            return Pipeline([('preprocess', build_preprocessor(X_train, choices, imputation_method)), ('model', estimator)])
+        forest = RandomForestClassifier if classification else RandomForestRegressor
+        def objective(trial):
+            estimator = forest(n_estimators=trial.suggest_int('n_estimators', 30, 80), max_depth=trial.suggest_int('max_depth', 3, 10), random_state=42, n_jobs=2)
+            fitted = pipeline(estimator).fit(X_fit, y_fit)
+            return metric(y_val, fitted.predict(X_val))
+        study = optuna.create_study(direction='maximize' if classification else 'minimize', sampler=optuna.samplers.TPESampler(seed=42))
+        study.optimize(objective, n_trials=3)
+        candidates = {'Random Forest': forest(**study.best_params, random_state=42, n_jobs=2)}
         try:
-            storage = get_storage_provider()
-            db = self.db_session_maker()
-            from database.models import Project
-            project = db.query(Project).filter(Project.id == project_id).first()
-            db.close()
-            
-            if project and project.dataset_path:
-                print(f"Downloading real dataset from: {project.dataset_path}")
-                file_bytes = storage.download_file(project.dataset_path)
-                df = pd.read_csv(io.BytesIO(file_bytes))
-                
-                # Apply the user-selected imputation algorithm
-                from routers.projects import apply_imputation
-                df = apply_imputation(df, imputation_method)
-                
-                if target in df.columns:
-                    y = df[target]
-                    X = df.drop(columns=[target])
-                    
-                    # Basic preprocessing: encode categories, drop high-cardinality columns (like IDs)
-                    for col in X.columns:
-                        if X[col].dtype == 'object':
-                            if X[col].nunique() > 15:
-                                X = X.drop(columns=[col])
-                            else:
-                                X = pd.get_dummies(X, columns=[col], drop_first=True)
-                                
-                    # Fill missing values safety check
-                    X = X.fillna(0)
-                    
-                    loaded_real = True
-                    print(f"Successfully loaded and preprocessed real dataset. Shape: {X.shape}")
-                else:
-                    print(f"Target column '{target}' not found in dataset columns: {df.columns.tolist()}")
-        except Exception as e:
-            print(f"Error loading real dataset: {e}. Falling back to dummy data.")
-
-        if not loaded_real:
-            # Create dummy tabular data representing typical user dataset if file is not found or fails
-            num_samples = 1000
-            np.random.seed(42)
-            X = pd.DataFrame({
-                'tenure': np.random.randint(1, 72, size=num_samples),
-                'MonthlyCharges': np.random.uniform(20, 120, size=num_samples),
-                'support_calls': np.random.randint(0, 10, size=num_samples),
-                'contract_type': np.random.choice([0, 1, 2], size=num_samples),
-                'payment_method': np.random.choice([0, 1, 2, 3], size=num_samples)
-            })
-            
-            if problem_type == 'classification':
-                y = ((X['MonthlyCharges'] > 75) & (X['tenure'] < 12) | (X['support_calls'] > 4)).astype(int)
-            else:
-                y = X['MonthlyCharges'] * 12.5 + X['tenure'] * 2.2 - X['support_calls'] * 5.0
-
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-        best_params = {}
-        best_metric = 0.0
-
-        # 2. HPO Search using Optuna (TPESampler)
-        if problem_type == 'classification':
-            def objective(trial):
-                params = {
-                    'max_depth': trial.suggest_int('max_depth', 3, 9),
-                    'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2),
-                    'n_estimators': trial.suggest_int('n_estimators', 100, 300)
-                }
-                
-                # Start MLflow nested run inside study parent run
-                with mlflow.start_run(nested=True):
-                    mlflow.log_params(params)
-                    
-                    # Train model
-                    model = xgb.XGBClassifier(**params, random_state=42)
-                    model.fit(X_train, y_train)
-                    
-                    # Eval
-                    preds = model.predict(X_test)
-                    score = f1_score(y_test, preds)
-                    mlflow.log_metric("f1_score", score)
-                    
-                    return score
-
-            # Wrap HPO study in a parent run to support nested trials
-            with mlflow.start_run(run_name="optuna-hpo-study"):
-                study = optuna.create_study(direction="maximize")
-                study.optimize(objective, n_trials=5)
-                best_params = study.best_params
-                best_metric = study.best_value
-            print(f"Optuna Best Parameters: {best_params}, Best F1: {best_metric}")
-        else:
-            def objective_reg(trial):
-                params = {
-                    'num_leaves': trial.suggest_int('num_leaves', 15, 63),
-                    'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2),
-                    'max_depth': trial.suggest_int('max_depth', 4, 10)
-                }
-                with mlflow.start_run(nested=True):
-                    mlflow.log_params(params)
-                    model = lgb.LGBMRegressor(**params, random_state=42)
-                    model.fit(X_train, y_train)
-                    preds = model.predict(X_test)
-                    score = mean_squared_error(y_test, preds)
-                    mlflow.log_metric("mse", score)
-                    return score
-
-            with mlflow.start_run(run_name="optuna-hpo-study"):
-                study = optuna.create_study(direction="minimize")
-                study.optimize(objective_reg, n_trials=5)
-                best_params = study.best_params
-                best_metric = study.best_value
-            print(f"Optuna Best Parameters: {best_params}, Best MSE: {best_metric}")
-
-        # Initialize comparison dictionary
-        models_comparison = {
-            'XGBoost': { 'status': 'Idle', 'metric': None },
-            'LightGBM': { 'status': 'Idle', 'metric': None },
-            'Random Forest': { 'status': 'Idle', 'metric': None },
-            'Neural Network': { 'status': 'Idle', 'metric': None },
-            'Tabular Transformer': { 'status': 'Idle', 'metric': None }
-        }
-        self.update_models_comparison_db(project_id, models_comparison)
-
-        # 3. Train all models, compare, and log each run in MLflow
-        trained_models = {}
-        
-        # XGBoost
-        models_comparison['XGBoost']['status'] = 'Training'
-        self.update_models_comparison_db(project_id, models_comparison)
-        with mlflow.start_run(run_name="xgboost-run"):
-            mlflow.log_param("estimator_type", "XGBoost")
-            mlflow.log_param("max_depth", best_params.get("max_depth", 6))
-            mlflow.log_param("learning_rate", best_params.get("learning_rate", 0.1))
-            mlflow.log_param("n_estimators", best_params.get("n_estimators", 100))
-            if problem_type == 'classification':
-                model = xgb.XGBClassifier(**best_params, random_state=42)
-                model.fit(X_train, y_train)
-                preds = model.predict(X_test)
-                score = f1_score(y_test, preds)
-                mlflow.log_metric("f1_score", score)
-            else:
-                model = xgb.XGBRegressor(**best_params, random_state=42)
-                model.fit(X_train, y_train)
-                preds = model.predict(X_test)
-                score = mean_squared_error(y_test, preds)
-                mlflow.log_metric("mse", score)
-            trained_models['XGBoost'] = model
-            models_comparison['XGBoost'] = { 'status': 'Trained', 'metric': float(score) }
-        
-        # LightGBM
-        models_comparison['LightGBM']['status'] = 'Training'
-        self.update_models_comparison_db(project_id, models_comparison)
-        with mlflow.start_run(run_name="lightgbm-run"):
-            mlflow.log_param("estimator_type", "LightGBM")
-            mlflow.log_param("num_leaves", 31)
-            mlflow.log_param("max_depth", -1)
-            mlflow.log_param("learning_rate", 0.1)
-            if problem_type == 'classification':
-                model = lgb.LGBMClassifier(random_state=42, verbose=-1)
-                model.fit(X_train, y_train)
-                preds = model.predict(X_test)
-                score = f1_score(y_test, preds)
-                mlflow.log_metric("f1_score", score)
-            else:
-                model = lgb.LGBMRegressor(random_state=42, verbose=-1)
-                model.fit(X_train, y_train)
-                preds = model.predict(X_test)
-                score = mean_squared_error(y_test, preds)
-                mlflow.log_metric("mse", score)
-            trained_models['LightGBM'] = model
-            models_comparison['LightGBM'] = { 'status': 'Trained', 'metric': float(score) }
-
-        # Random Forest
-        models_comparison['Random Forest']['status'] = 'Training'
-        self.update_models_comparison_db(project_id, models_comparison)
-        with mlflow.start_run(run_name="randomforest-run"):
-            mlflow.log_param("estimator_type", "Random Forest")
-            mlflow.log_param("n_estimators", 150)
-            mlflow.log_param("max_depth", 16)
-            mlflow.log_param("min_samples_split", 5)
-            mlflow.log_param("min_samples_leaf", 2)
-            if problem_type == 'classification':
-                model = RandomForestClassifier(n_estimators=150, max_depth=16, min_samples_split=5, min_samples_leaf=2, random_state=42)
-                model.fit(X_train, y_train)
-                preds = model.predict(X_test)
-                score = f1_score(y_test, preds)
-                mlflow.log_metric("f1_score", score)
-            else:
-                model = RandomForestRegressor(n_estimators=150, max_depth=16, min_samples_split=5, min_samples_leaf=2, random_state=42)
-                model.fit(X_train, y_train)
-                preds = model.predict(X_test)
-                score = mean_squared_error(y_test, preds)
-                mlflow.log_metric("mse", score)
-            trained_models['Random Forest'] = model
-            models_comparison['Random Forest'] = { 'status': 'Trained', 'metric': float(score) }
-
-        # Neural Network
-        models_comparison['Neural Network']['status'] = 'Training'
-        self.update_models_comparison_db(project_id, models_comparison)
-        with mlflow.start_run(run_name="neuralnetwork-run"):
-            mlflow.log_param("estimator_type", "Neural Network (MLP)")
-            mlflow.log_param("hidden_layer_sizes", "[128, 64, 32]")
-            mlflow.log_param("activation", "relu")
-            mlflow.log_param("solver", "adam")
-            mlflow.log_param("max_iter", 300)
-            mlflow.log_param("early_stopping", True)
-            mlflow.log_param("alpha", 0.0001)
-            if problem_type == 'classification':
-                model = MLPClassifier(hidden_layer_sizes=(128, 64, 32), max_iter=300, early_stopping=True, alpha=0.0001, random_state=42)
-                model.fit(X_train, y_train)
-                preds = model.predict(X_test)
-                score = f1_score(y_test, preds)
-                mlflow.log_metric("f1_score", score)
-            else:
-                model = MLPRegressor(hidden_layer_sizes=(128, 64, 32), max_iter=300, early_stopping=True, alpha=0.0001, random_state=42)
-                model.fit(X_train, y_train)
-                preds = model.predict(X_test)
-                score = mean_squared_error(y_test, preds)
-                mlflow.log_metric("mse", score)
-            trained_models['Neural Network'] = model
-            models_comparison['Neural Network'] = { 'status': 'Trained', 'metric': float(score) }
-
-        # Tabular Transformer
-        models_comparison['Tabular Transformer']['status'] = 'Training'
-        self.update_models_comparison_db(project_id, models_comparison)
-        with mlflow.start_run(run_name="transformer-run"):
-            mlflow.log_param("estimator_type", "Tabular Transformer")
-            mlflow.log_param("num_attention_heads", "1")
-            mlflow.log_param("projection_dim", "8")
-            mlflow.log_param("hidden_layer_sizes", "[32, 16]")
-            mlflow.log_param("random_state", 42)
-            model = TabularTransformer(problem_type=problem_type, random_state=42)
-            model.fit(X_train, y_train)
-            preds = model.predict(X_test)
-            if problem_type == 'classification':
-                score = f1_score(y_test, preds)
-                mlflow.log_metric("f1_score", score)
-            else:
-                score = mean_squared_error(y_test, preds)
-                mlflow.log_metric("mse", score)
-            trained_models['Tabular Transformer'] = model
-            models_comparison['Tabular Transformer'] = { 'status': 'Trained', 'metric': float(score) }
-
-        # Determine Best Champion Model
-        if problem_type == 'classification':
-            best_model_name = max(models_comparison, key=lambda k: models_comparison[k]['metric'] if models_comparison[k]['metric'] is not None else -1.0)
-        else:
-            best_model_name = min(models_comparison, key=lambda k: models_comparison[k]['metric'] if models_comparison[k]['metric'] is not None else 1e9)
-
-        champion_model = trained_models[best_model_name]
-        champion_score = models_comparison[best_model_name]['metric']
-        print(f"Champion Selected: {best_model_name} with score {champion_score}")
-
-        # Update database comparison statuses
-        self.update_models_comparison_db(project_id, models_comparison)
-
-        # 4. Explainability Calculations via SHAP
-        shap_importance = []
+            import xgboost as xgb
+            candidates['XGBoost'] = (xgb.XGBClassifier if classification else xgb.XGBRegressor)(n_estimators=60, max_depth=4, random_state=42, n_jobs=2)
+        except ImportError: pass
         try:
-            # Limit test/train sizes to speed up SHAP computations
-            X_train_shap = X_train.head(100)
-            X_test_shap = X_test.head(50)
-            explainer = shap.Explainer(champion_model, X_train_shap)
-            shap_values = explainer(X_test_shap)
-            
-            vals = shap_values.values if hasattr(shap_values, "values") else np.array(shap_values)
-            if len(vals.shape) == 3: # Multi-class output dimension handling
-                vals = vals[:, :, 0]
-                
-            mean_shap = np.abs(vals).mean(axis=0)
-            for col, val in zip(X.columns, mean_shap):
-                shap_importance.append({
-                    "feature": col,
-                    "shap": float(val),
-                    "type": "Positive impact" if val > 0 else "Negative impact"
-                })
-        except Exception as shap_err:
-            print(f"SHAP computations failed ({shap_err}), falling back to native feature importances.")
+            import lightgbm as lgb
+            candidates['LightGBM'] = (lgb.LGBMClassifier if classification else lgb.LGBMRegressor)(n_estimators=60, max_depth=4, random_state=42, n_jobs=2, verbosity=-1)
+        except ImportError: pass
+        candidates['Neural Network'] = (MLPClassifier if classification else MLPRegressor)(hidden_layer_sizes=(32,16), max_iter=120, random_state=42)
+        comparison = {name: {'status': 'Idle', 'metric': None} for name in candidates}
+        self.update_models_comparison_db(project_id, comparison)
+        trained = {}
+        for name, estimator in candidates.items():
+            comparison[name] = {'status': 'Training', 'metric': None}
+            self.update_models_comparison_db(project_id, comparison)
             try:
-                importances = champion_model.feature_importances_
-                for col, val in zip(X.columns, importances):
-                    shap_importance.append({
-                        "feature": col,
-                        "shap": float(val),
-                        "type": "Positive impact"
-                    })
-            except Exception as importances_err:
-                print(f"Failed to fetch model feature importances: {importances_err}")
-                # Minimal placeholder fallback
-                for col in X.columns[:3]:
-                    shap_importance.append({
-                        "feature": col,
-                        "shap": 0.1,
-                        "type": "Positive impact"
-                    })
-        
-        # Sort features by importance
-        shap_importance = sorted(shap_importance, key=lambda x: x['shap'], reverse=True)
-
-        # 5. Serialize model and upload binaries to MinIO / S3
-        model_url = "Pending"
+                fitted = pipeline(estimator).fit(X_train, y_train)
+                predictions = fitted.predict(X_test)
+                score = metric(y_test, predictions)
+                model_path = storage.upload_model(project_id, name.lower().replace(' ', '_'), pickle.dumps(fitted))
+                comparison[name] = {'status': 'Trained', 'metric': score, 'artifact_path': model_path, 'accuracy': float(accuracy_score(y_test, predictions)) if classification else None}
+                trained[name] = fitted
+            except Exception as error:
+                comparison[name] = {'status': 'Failed', 'metric': None, 'error': str(error)}
+            self.update_models_comparison_db(project_id, comparison)
+        if not trained: raise ValueError('All candidate models failed to train')
+        champion_name = (max if classification else min)(trained, key=lambda name: comparison[name]['metric'])
+        champion = trained[champion_name]
+        preprocessing = champion.named_steps['preprocess']
+        encoded = preprocessing.transform(X_test.head(30))
+        names = preprocessing.get_feature_names_out().tolist()
+        wrapped = champion.named_steps['model']
+        estimator = wrapped.estimator if classification else wrapped
+        explanation_method = 'SHAP'
+        local_drivers = []
         try:
-            storage = get_storage_provider()
-            model_urls = {}
-            for m_name, m_obj in trained_models.items():
-                m_slug = m_name.lower().replace(" ", "_")
-                m_bytes = pickle.dumps(m_obj)
-                m_url = storage.upload_model(project_id, m_slug, m_bytes)
-                model_urls[m_name] = m_url
-                
-            model_url = model_urls.get(best_model_name, "Pending")
-            print(f"Successfully uploaded all model binaries: {model_urls}")
-        except Exception as e:
-            print(f"Failed to upload model binaries to storage: {e}")
-
-        print(f"Trained champion model registered. SHAP Explanations calculated.")
-        
-        # 6. Return results to be written to PostgreSQL databases
-        return {
-            "best_model": best_model_name,
-            "best_f1": float(champion_score) if problem_type == 'classification' else None,
-            "best_accuracy": float(champion_score) if problem_type == 'classification' else None,
-            "best_mse": float(champion_score) if problem_type == 'regression' else None,
-            "trials_run": 5,
-            "top_features": [item["feature"] for item in shap_importance[:3]],
-            "shap_global": shap_importance,
-            "best_params": best_params,
-            "model_path": model_url
-        }
+            import shap
+            if not hasattr(estimator, 'feature_importances_'): raise ValueError('Tree SHAP unavailable for this estimator')
+            explainer = shap.TreeExplainer(estimator)
+            values = explainer.shap_values(encoded)
+            if isinstance(values, list): values = values[-1]
+            values = np.asarray(values)
+            if values.ndim == 3: values = values[:, :, -1]
+            global_values = np.abs(values).mean(axis=0)
+            for index in np.argsort(np.abs(values[0]))[::-1][:8]:
+                local_drivers.append({'feature': names[index], 'value': str(round(float(encoded[0,index]),4)), 'impact': f'{float(values[0,index]):+.4f} SHAP'})
+        except Exception:
+            from sklearn.inspection import permutation_importance
+            result = permutation_importance(estimator, encoded, wrapped.encoder_.transform(y_test.head(30)) if classification else y_test.head(30), n_repeats=3, random_state=42)
+            global_values = np.maximum(result.importances_mean, 0)
+            explanation_method = 'Permutation importance'
+        global_importance = sorted([{'feature': name, 'shap': float(value), 'type': explanation_method} for name,value in zip(names, global_values)], key=lambda item:item['shap'], reverse=True)
+        row = X_test.head(1)
+        prediction = champion.predict(row)[0]
+        probability = float(champion.predict_proba(row)[0].max()) if classification else None
+        local = {'customerId': str(row.index[0]), 'prediction': str(prediction), 'probability': probability, 'risk': f'Predicted class: {prediction}' if classification else f'Predicted value: {float(prediction):.4f}', 'drivers': local_drivers, 'explanation_method': explanation_method}
+        score = comparison[champion_name]['metric']
+        trials = [{'trial': trial.number+1, 'params': trial.params, 'f1': trial.value, 'status': 'Completed (Best)' if trial.number == study.best_trial.number else 'Completed'} for trial in study.trials]
+        return {'best_model': champion_name, 'best_f1': score if classification else None, 'best_mse': None if classification else score, 'best_accuracy': comparison[champion_name]['accuracy'], 'trials_run': len(trained), 'hpo_trials': trials, 'top_features': [item['feature'] for item in global_importance[:8]], 'shap_global': global_importance, 'shap_local': local, 'model_path': comparison[champion_name]['artifact_path'], 'models_comparison': comparison}

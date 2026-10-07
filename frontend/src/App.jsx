@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useProjectStore } from './store/useProjectStore';
 
@@ -17,6 +17,7 @@ import KnowledgeCardPage from './pages/KnowledgeCardPage';
 import AiAssistantPage from './pages/AiAssistantPage';
 import ModelRegistryPage from './pages/ModelRegistryPage';
 import MonitoringPage from './pages/MonitoringPage';
+import SettingsPage from './pages/SettingsPage';
 
 // Guard component to protect pages requiring active login sessions
 function PrivateRoute({ children }) {
@@ -25,6 +26,9 @@ function PrivateRoute({ children }) {
 }
 
 export default function App() {
+  const { authReady, initializeAuth } = useProjectStore();
+  useEffect(() => { initializeAuth(); }, [initializeAuth]);
+  if (!authReady) return <p className="p-8 text-zinc-400">Checking session...</p>;
   return (
     <Router>
       <Routes>
@@ -51,6 +55,8 @@ export default function App() {
                   <Route path="/assistant" element={<AiAssistantPage />} />
                   <Route path="/registry" element={<ModelRegistryPage />} />
                   <Route path="/monitoring" element={<MonitoringPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Layout>
             </PrivateRoute>

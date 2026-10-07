@@ -1,3 +1,4 @@
+import { downloadFile } from '../api';
 import React, { useState, useEffect } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
@@ -10,33 +11,8 @@ export default function EdaPage() {
   const [selectedImputation, setSelectedImputation] = useState('KNN');
 
   const handleDownloadImputed = async () => {
-    const API_BASE = '/api';
-    try {
-      const response = await fetch(`${API_BASE}/projects/${project.id}/presigned-download-dataset?imputation_method=${selectedImputation}`);
-      if (!response.ok) throw new Error("Failed to fetch signed dataset url");
-      const data = await response.json();
-      
-      // Fetch as blob in background to hide signed URL from browser address bar
-      const fileRes = await fetch(data.url);
-      const blob = await fileRes.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = blobUrl;
-      a.download = `${project.id}_imputed_${selectedImputation.toLowerCase()}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(blobUrl);
-      a.remove();
-    } catch (err) {
-      console.warn("Presigned dataset download failed/CORS block. Falling back to backend stream:", err);
-      // Fallback: download directly from backend streaming proxy using hidden iframe to prevent page navigation
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      iframe.src = `${API_BASE}/projects/${project.id}/download-dataset?imputation_method=${selectedImputation}`;
-      document.body.appendChild(iframe);
-      setTimeout(() => iframe.remove(), 5000);
-    }
+    try { await downloadFile(`/projects/${project.id}/download-dataset?imputation_method=${selectedImputation}`, `${project.id}_imputed_${selectedImputation.toLowerCase()}.csv`); }
+    catch (err) { alert(err.message); }
   };
 
   // Parse dynamic feature distributions
@@ -44,43 +20,23 @@ export default function EdaPage() {
   const [selectedFeature, setSelectedFeature] = useState('');
 
   useEffect(() => {
-    if (distFeatures.length > 0) {
-      setSelectedFeature(distFeatures[0]);
+    const available = Object.keys(project.distributions || {});
+    if (available.length > 0) {
+      setSelectedFeature(previous => available.includes(previous) ? previous : available[0]);
     } else {
-      setSelectedFeature('tenure');
+      setSelectedFeature('');
     }
   }, [project.id, project.distributions]);
 
-  // Dynamic distribution data or mock fallback
-  const distributionData = project.distributions && project.distributions[selectedFeature]
-    ? project.distributions[selectedFeature]
-    : [
-        { bin: '0-10', count: 1400 },
-        { bin: '10-20', count: 700 },
-        { bin: '20-30', count: 620 },
-        { bin: '30-40', count: 500 },
-        { bin: '40-50', count: 480 },
-        { bin: '50-60', count: 550 },
-        { bin: '60-70', count: 720 },
-        { bin: '70-80', count: 1350 },
-      ];
+  const selectedFeatureObj = project.features?.find(f => f.name === selectedFeature);
+  const isNumericalFeature = selectedFeatureObj 
+    ? (selectedFeatureObj.type?.includes('int') || selectedFeatureObj.type?.includes('float')) 
+    : true;
 
-  // Dynamic target class distribution or mock fallback
-  const classData = project.classDistribution && project.classDistribution.length > 0
-    ? project.classDistribution
-    : [
-        { name: 'Retained (No)', count: 36750, color: '#3f3f46' },
-        { name: 'Churned (Yes)', count: 13250, color: '#7c3aed' },
-      ];
-
-  // Dynamic correlation matrix or mock fallback
-  const corrColumns = project.correlations?.columns || ['tenure', 'MonthlyCharges', 'TotalCharges', 'churn'];
-  const corrValues = project.correlations?.values || [
-    [1.00, 0.24, 0.82, -0.35],
-    [0.24, 1.00, 0.65, 0.19],
-    [0.82, 0.65, 1.00, -0.19],
-    [-0.35, 0.19, -0.19, 1.00]
-  ];
+  const distributionData = project.distributions?.[selectedFeature] || [];
+  const classData = project.problemType === 'regression' ? (project.distributions?.[project.targetVariable] || []).map(item => ({name:item.bin,count:item.count,color:'#7c3aed'})) : project.classDistribution || [];
+  const corrColumns = project.correlations?.columns || [];
+  const corrValues = project.correlations?.values || [];
 
   return (
     <div className="space-y-6">
@@ -146,33 +102,46 @@ export default function EdaPage() {
 
               <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={distributionData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorFeature" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.4}/>
-                        <stop offset="95%" stopColor="#7c3aed" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                    <XAxis dataKey="bin" stroke="#71717a" fontSize={11} />
-                    <YAxis stroke="#71717a" fontSize={11} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '12px' }}
-                      labelStyle={{ color: '#a78bfa', fontWeight: 'bold' }}
-                    />
-                    <Area type="monotone" dataKey="count" stroke="#7c3aed" strokeWidth={2} fillOpacity={1} fill="url(#colorFeature)" />
-                  </AreaChart>
+                  {isNumericalFeature ? (
+                    <AreaChart data={distributionData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="colorFeature" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.4}/>
+                          <stop offset="95%" stopColor="#7c3aed" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                      <XAxis dataKey="bin" stroke="#71717a" fontSize={11} />
+                      <YAxis stroke="#71717a" fontSize={11} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '12px' }}
+                        labelStyle={{ color: '#a78bfa', fontWeight: 'bold' }}
+                      />
+                      <Area type="monotone" dataKey="count" stroke="#7c3aed" strokeWidth={2} fillOpacity={1} fill="url(#colorFeature)" />
+                    </AreaChart>
+                  ) : (
+                    <BarChart data={distributionData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                      <XAxis dataKey="bin" stroke="#71717a" fontSize={11} />
+                      <YAxis stroke="#71717a" fontSize={11} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '12px' }}
+                        itemStyle={{ color: '#fff' }}
+                      />
+                      <Bar dataKey="count" fill="#7c3aed" radius={[8, 8, 0, 0]} maxBarSize={50} />
+                    </BarChart>
+                  )}
                 </ResponsiveContainer>
               </div>
             </div>
-
+ 
             {/* Target Variable distribution Bar chart */}
             <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 space-y-4">
               <div>
-                <h3 className="font-semibold text-zinc-200 text-sm">Target Variable Class Balance ('{project.targetVariable}')</h3>
+                <h3 className="font-semibold text-zinc-200 text-sm">{project.problemType === 'regression' ? 'Target Distribution' : 'Target Class Balance'} ('{project.targetVariable}')</h3>
                 <p className="text-xs text-zinc-500 font-mono">Disparity class balance metrics</p>
               </div>
-
+ 
               <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={classData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
@@ -193,15 +162,25 @@ export default function EdaPage() {
               </div>
             </div>
           </div>
-
+ 
           {/* Statistical summary panel */}
           <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 space-y-4">
             <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-brand-primary" />
-              Automated Statistical Insights
+              Data Analyst Dataset Assessment
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-zinc-400">
+            {project.edaAnalysis ? (
+              <div className="bg-brand-dark-bg/60 p-4 rounded-xl border border-brand-dark-border/40 text-sm leading-relaxed text-zinc-300 font-medium">
+                {project.edaAnalysis}
+              </div>
+            ) : (
+              <div className="text-xs text-zinc-500 font-mono italic">
+                No custom assessment report found. Generate profile stats by loading a dataset.
+              </div>
+            )}
+ 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-zinc-400 pt-4 border-t border-brand-dark-border/30">
               <ul className="space-y-2.5 list-disc pl-4">
                 <li>
                   <strong className="text-zinc-200">Data Shape:</strong> Loaded {project.rowsCount?.toLocaleString()} records spanning {project.columnsCount} dimensions.
@@ -215,7 +194,7 @@ export default function EdaPage() {
                   <strong className="text-zinc-200">Class Balance:</strong> Target column class balance is mapped dynamically, showing {classData.length} unique labels.
                 </li>
                 <li>
-                  <strong className="text-zinc-200">Imbalance Resolution:</strong> The pipeline is configured to use <strong className="text-amber-400 font-mono">{project.balancingMethod}</strong> strategy for HPO training validation.
+                  <strong className="text-zinc-200">Imbalance Resolution:</strong> The pipeline is configured to use <strong className="text-amber-400 font-mono">{project.balancingMethod || 'None'}</strong> strategy for HPO training validation.
                 </li>
               </ul>
             </div>
@@ -317,7 +296,7 @@ export default function EdaPage() {
                   ))
                 ) : (
                   <div className="text-center py-12 text-zinc-500 text-xs space-y-3">
-                    <div className="text-emerald-400 text-3xl">✓</div>
+                    <div className="text-emerald-400 text-3xl">Ready</div>
                     <div className="text-zinc-300 font-bold">100% Complete</div>
                     <p className="px-4">No missing or null values found in the raw dataset!</p>
                   </div>

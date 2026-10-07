@@ -10,6 +10,7 @@ export default function CreateProjectPage() {
   const [projectName, setProjectName] = useState('');
   const [targetVariable, setTargetVariable] = useState('');
   const [description, setDescription] = useState('');
+  const [problemType, setProblemType] = useState('auto');
   const [file, setFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -23,43 +24,17 @@ export default function CreateProjectPage() {
     }
   };
 
-  const simulateUpload = (selectedFile) => {
-    setUploading(true);
-    setUploadProgress(0);
-    setCompleted(false);
-    
-    const interval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setUploading(false);
-          setCompleted(true);
-          return 100;
-        }
-        return prev + 20;
-      });
-    }, 200);
-  };
-
-  const handleSubmit = (e) => {
+  const [error, setError] = useState('');
+  const simulateUpload = () => { setCompleted(true); setUploadProgress(100); };
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!file) {
-      alert('Please upload a dataset CSV first.');
-      return;
-    }
-    
-    // Create the project in the store
-    createProject(
-      projectName,
-      targetVariable,
-      description,
-      file,
-      file.name,
-      (file.size / (1024 * 1024)).toFixed(2) + ' MB'
-    );
-
-    // Navigate back to overview of newly created project
-    navigate('/overview');
+    if (!file) return;
+    setUploading(true); setError('');
+    try {
+      await createProject(projectName, targetVariable, description, file, problemType);
+      navigate('/overview');
+    } catch (err) { setError(err.response?.data?.detail || err.message); }
+    finally { setUploading(false); }
   };
 
   return (
@@ -81,6 +56,7 @@ export default function CreateProjectPage() {
       {/* Form Card */}
       <form onSubmit={handleSubmit} className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-6 space-y-5 shadow-xl">
         
+        {error && <p role="alert" className="text-red-400 text-sm">{error}</p>}
         {/* Project Details */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1.5">
@@ -110,6 +86,13 @@ export default function CreateProjectPage() {
           </div>
         </div>
 
+        <label className="block text-sm text-zinc-400">Problem Type
+          <select aria-label="Problem type" value={problemType} onChange={event => setProblemType(event.target.value)} className="block w-full mt-2 bg-brand-dark-bg border border-brand-dark-border rounded-lg p-2">
+            <option value="auto">Detect from target column</option>
+            <option value="classification">Classification (predict a category)</option>
+            <option value="regression">Regression (predict a numeric quantity)</option>
+          </select>
+        </label>
         {/* Business Goal Description */}
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-zinc-400">Business Problem Description</label>
@@ -166,7 +149,7 @@ export default function CreateProjectPage() {
                 {uploading && (
                   <div className="space-y-1.5">
                     <div className="flex justify-between text-xs font-mono text-zinc-500">
-                      <span>Uploading to MinIO S3...</span>
+                      <span>Uploading and analyzing dataset...</span>
                       <span>{uploadProgress}%</span>
                     </div>
                     <div className="w-full bg-brand-dark-card h-1.5 rounded-full overflow-hidden">
@@ -181,7 +164,7 @@ export default function CreateProjectPage() {
                 {completed && (
                   <p className="text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" />
-                    Dataset successfully uploaded and registered in MinIO s3://datasets/{file.name}
+                    Dataset selected. Initialize the project to upload and analyze it.
                   </p>
                 )}
               </div>

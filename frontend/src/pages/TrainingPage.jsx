@@ -31,7 +31,7 @@ export default function TrainingPage() {
     try {
       await triggerTraining(project.id, selectedImputation);
     } catch (e) {
-      console.error(e);
+      alert(e.response?.data?.detail || e.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -43,14 +43,13 @@ export default function TrainingPage() {
     'LightGBM': { status: 'Idle', metric: null },
     'Random Forest': { status: 'Idle', metric: null },
     'Neural Network': { status: 'Idle', metric: null },
-    'Tabular Transformer': { status: 'Idle', metric: null }
   };
 
   const getMetricLabel = () => {
-    return project.problemType === 'classification' ? 'F1 Validation Score' : 'MSE Validation Loss';
+    return project.problemType === 'classification' ? 'Test F1 (weighted)' : 'Test MSE';
   };
 
-  const totalModels = 5;
+  const totalModels = Object.keys(models).length || 1;
   const trainedCount = Object.values(models).filter(m => m.status === 'Trained').length;
   const progressPercent = Math.round((trainedCount / totalModels) * 100);
   const currentTrainingModel = Object.keys(models).find(name => models[name].status === 'Training') || 'Optuna Optimization';
@@ -76,7 +75,7 @@ export default function TrainingPage() {
                 <option value="Median">Median Imputation</option>
                 <option value="Mean">Mean Imputation</option>
                 <option value="Mode">Mode Imputation</option>
-                <option value="KNN">KNN Imputation (Champion)</option>
+                <option value="KNN">KNN Imputation</option>
               </select>
             </div>
             
@@ -124,7 +123,7 @@ export default function TrainingPage() {
             activeTab === 'pipeline' ? 'border-b-2 border-brand-primary text-violet-300' : 'text-zinc-500 hover:text-zinc-300'
           }`}
         >
-          Kafka Live Node Graph
+          Training Pipeline
         </button>
         <button
           onClick={() => setActiveTab('trials')}
@@ -132,109 +131,15 @@ export default function TrainingPage() {
             activeTab === 'trials' ? 'border-b-2 border-brand-primary text-violet-300' : 'text-zinc-500 hover:text-zinc-300'
           }`}
         >
-          Optuna HPO Trials
+          HPO Trials
         </button>
       </div>
 
-      {/* Tab 1: Live Kafka Node Graph */}
+      {/* Tab 1: Live Database Queue Node Graph */}
       {activeTab === 'pipeline' && (
         <div className="space-y-6">
-          {/* Animated SVG Node Graph */}
-          <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-6 relative overflow-hidden">
-            
-            {/* Legend indicators */}
-            <div className="absolute top-4 right-4 flex items-center gap-3 text-[10px] font-mono text-zinc-500 bg-brand-dark-bg/60 border border-brand-dark-border/30 px-2.5 py-1.5 rounded-lg z-10">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-brand-primary animate-pulse"></span>
-                Active Queue Flow
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                Completed
-              </span>
-            </div>
-
-            <div className="space-y-2 mb-4">
-              <h3 className="font-semibold text-zinc-200 text-sm">Live Kafka Pipeline Telemetry</h3>
-              <p className="text-xs text-zinc-500 font-mono">Real-time message routing across parallel workers</p>
-            </div>
-
-            {/* Interactive SVG Node Diagram */}
-            <div className="w-full flex items-center justify-center p-4 bg-brand-dark-bg/40 rounded-xl border border-brand-dark-border/20 min-h-[300px]">
-              <svg viewBox="0 0 800 240" className="w-full max-w-3xl overflow-visible">
-                {/* Node connections lines */}
-                <path d="M 120 120 L 250 120" stroke="#7c3aed" strokeWidth="2" strokeDasharray="6 4" className="animate-[dash_10s_linear_infinite]" />
-                
-                {/* Worker 1 active line */}
-                <path d="M 330 120 L 460 70" stroke={isTraining ? '#7c3aed' : '#3f3f46'} strokeWidth="2" strokeDasharray="6 4" className={isTraining ? "animate-[dash_8s_linear_infinite]" : ""} />
-                
-                {/* Worker 2 active line (Now Animated during training!) */}
-                <path d="M 330 120 L 460 170" stroke={isTraining ? '#7c3aed' : '#3f3f46'} strokeWidth="2" strokeDasharray="6 4" className={isTraining ? "animate-[dash_8s_linear_infinite]" : ""} />
-                
-                {/* Outgoing Worker lines */}
-                <path d="M 540 70 L 670 120" stroke={isTraining ? '#7c3aed' : '#3f3f46'} strokeWidth="2" strokeDasharray="6 4" className={isTraining ? "animate-[dash_8s_linear_infinite]" : ""} />
-                <path d="M 540 170 L 670 120" stroke={isTraining ? '#7c3aed' : '#3f3f46'} strokeWidth="2" strokeDasharray="6 4" className={isTraining ? "animate-[dash_8s_linear_infinite]" : ""} />
-
-                {/* Node 1: Request */}
-                <g transform="translate(40, 80)">
-                  <rect width="80" height="80" rx="12" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
-                  <circle cx="40" cy="30" r="14" fill="#7c3aed" fillOpacity="0.1" stroke="#7c3aed" strokeWidth="1.5" />
-                  <path d="M 36 30 L 44 30 M 40 26 L 40 34" stroke="#c084fc" strokeWidth="2" strokeLinecap="round" />
-                  <text x="40" y="62" fill="#a1a1aa" fontSize="10" textAnchor="middle" fontWeight="bold">Request</text>
-                  <text x="40" y="73" fill="#34d399" fontSize="8" textAnchor="middle" fontFamily="monospace">Complete</text>
-                </g>
-
-                {/* Node 2: Kafka Broker */}
-                <g transform="translate(250, 80)">
-                  <rect width="80" height="80" rx="12" fill="#18181b" stroke="#7c3aed" strokeWidth="1.5" className="animate-pulse" />
-                  <circle cx="40" cy="30" r="14" fill="#7c3aed" fillOpacity="0.1" stroke="#7c3aed" strokeWidth="1.5" />
-                  <path d="M 32 30 A 8 8 0 0 1 48 30" stroke="#c084fc" strokeWidth="1.5" fill="none" />
-                  <circle cx="40" cy="30" r="3" fill="#c084fc" />
-                  <text x="40" y="62" fill="#a1a1aa" fontSize="10" textAnchor="middle" fontWeight="bold">Kafka Queue</text>
-                  <text x="40" y="73" fill="#a78bfa" fontSize="8" textAnchor="middle" fontFamily="monospace">{isTraining ? 'Active (5 tasks)' : 'Idle (0 tasks)'}</text>
-                </g>
-
-                {/* Node 3: Worker 1 (XGB/LGB/RF) */}
-                <g transform="translate(460, 30)">
-                  <rect width="80" height="80" rx="12" fill="#18181b" stroke={isTraining ? '#7c3aed' : '#3f3f46'} strokeWidth="1.5" />
-                  <circle cx="40" cy="30" r="14" fill={isTraining ? '#7c3aed' : '#27272a'} fillOpacity="0.1" stroke={isTraining ? '#7c3aed' : '#3f3f46'} strokeWidth="1.5" />
-                  <path d="M 35 25 L 45 25 M 35 30 L 45 30 M 35 35 L 45 35" stroke={isTraining ? '#c084fc' : '#71717a'} strokeWidth="1.5" />
-                  <text x="40" y="62" fill="#a1a1aa" fontSize="10" textAnchor="middle" fontWeight="bold">Worker 1</text>
-                  <text x="40" y="73" fill={isTraining ? '#f59e0b' : '#71717a'} fontSize="8" textAnchor="middle" fontFamily="monospace">
-                    {isTraining ? 'ACTIVE (Tree HPO)' : 'IDLE'}
-                  </text>
-                </g>
-
-                {/* Node 4: Worker 2 (NN/Transformer - Now fully animated!) */}
-                <g transform="translate(460, 130)">
-                  <rect width="80" height="80" rx="12" fill="#18181b" stroke={isTraining ? '#7c3aed' : '#3f3f46'} strokeWidth="1.5" />
-                  <circle cx="40" cy="30" r="14" fill={isTraining ? '#7c3aed' : '#27272a'} fillOpacity="0.1" stroke={isTraining ? '#7c3aed' : '#3f3f46'} strokeWidth="1.5" />
-                  <path d="M 35 25 L 45 25 M 35 30 L 45 30 M 35 35 L 45 35" stroke={isTraining ? '#c084fc' : '#71717a'} strokeWidth="1.5" />
-                  <text x="40" y="62" fill="#a1a1aa" fontSize="10" textAnchor="middle" fontWeight="bold">Worker 2</text>
-                  <text x="40" y="73" fill={isTraining ? '#f59e0b' : '#71717a'} fontSize="8" textAnchor="middle" fontFamily="monospace">
-                    {isTraining ? 'ACTIVE (NN/Attn)' : 'IDLE'}
-                  </text>
-                </g>
-
-                {/* Node 5: Storage (MLflow/PG) */}
-                <g transform="translate(670, 80)">
-                  <rect width="80" height="80" rx="12" fill="#18181b" stroke="#3f3f46" strokeWidth="1.5" />
-                  <circle cx="40" cy="30" r="14" fill="#27272a" stroke="#3f3f46" strokeWidth="1.5" />
-                  <path d="M 34 26 L 46 26 M 34 30 L 46 30 M 34 34 L 46 34" stroke="#71717a" strokeWidth="2" />
-                  <text x="40" y="62" fill="#a1a1aa" fontSize="10" textAnchor="middle" fontWeight="bold">MLflow State</text>
-                  <text x="40" y="73" fill="#34d399" fontSize="8" textAnchor="middle" fontFamily="monospace">Connected</text>
-                </g>
-              </svg>
-            </div>
-            
-            {/* Inline CSS animation styles for dashboard SVGs */}
-            <style dangerouslySetInnerHTML={{__html: `
-              @keyframes dash {
-                to {
-                  stroke-dashoffset: -40;
-                }
-              }
-            `}} />
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {['Uploaded dataset', 'Train / validation / test split', 'Model fitting & comparison', 'Saved inference pipelines'].map((stage, index) => <div key={stage} className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5"><span className="text-violet-400 font-mono">{index+1}</span><p className="mt-2 text-sm">{stage}</p></div>)}
           </div>
 
           {/* Model Comparison Benchmark Status Panel */}
@@ -245,7 +150,7 @@ export default function TrainingPage() {
             </h3>
 
             {/* Model Comparison Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               {Object.keys(models).map((modelName) => {
                 const modelData = models[modelName];
                 const isModelTraining = modelData.status === 'Training';
@@ -354,7 +259,7 @@ export default function TrainingPage() {
                       </code>
                     </td>
                     <td className="p-4 text-center font-mono font-bold text-emerald-400">
-                      {tr.f1 ? tr.f1.toFixed(3) : 'N/A'}
+                      {tr.f1 != null ? tr.f1.toFixed(3) : 'N/A'}
                     </td>
                     <td className="p-4">
                       <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
@@ -386,7 +291,7 @@ export default function TrainingPage() {
       <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 space-y-4">
         <div className="flex justify-between items-center">
           <div>
-            <h3 className="text-sm font-semibold text-zinc-200">HPO & Ensemble Training History</h3>
+            <h3 className="text-sm font-semibold text-zinc-200">HPO & Model Training History</h3>
             <p className="text-xs text-zinc-500 font-mono">Audited history of training jobs executed on this project</p>
           </div>
           <button 
@@ -407,7 +312,7 @@ export default function TrainingPage() {
                   <th className="py-2.5 px-3">Model Type / Configuration</th>
                   <th className="py-2.5 px-3">Imputation</th>
                   <th className="py-2.5 px-3">Status</th>
-                  <th className="py-2.5 px-3">Accuracy / Best F1</th>
+                  <th className="py-2.5 px-3">{project.problemType === 'regression' ? 'Test MSE' : 'Test F1'}</th>
                   <th className="py-2.5 px-3">Started At</th>
                   <th className="py-2.5 px-3">Completed At</th>
                 </tr>
@@ -433,17 +338,17 @@ export default function TrainingPage() {
                                 ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
                                 : 'bg-zinc-800 text-zinc-500 border border-brand-dark-border'
                         }`}>
-                          {job.status}
+                          {job.status}{job.metrics_json?.error && <span className="ml-2 text-red-400">{job.metrics_json.error}</span>}
                         </span>
                       </td>
                       <td className="py-3 px-3 text-violet-300 font-bold">
-                        {job.metrics_json?.best_metric ? job.metrics_json.best_metric.toFixed(4) : 'N/A'}
+                        {job.metrics_json?.best_metric != null ? job.metrics_json.best_metric.toFixed(4) : 'N/A'}
                       </td>
                       <td className="py-3 px-3 text-zinc-500">
-                        {job.started_at ? new Date(job.started_at).toLocaleString() : 'Pending'}
+                        {job.started_at ? new Date(job.started_at.endsWith('Z') ? job.started_at : job.started_at + 'Z').toLocaleString() : 'Pending'}
                       </td>
                       <td className="py-3 px-3 text-zinc-500">
-                        {job.completed_at ? new Date(job.completed_at).toLocaleString() : 'N/A'}
+                        {job.completed_at ? new Date(job.completed_at.endsWith('Z') ? job.completed_at : job.completed_at + 'Z').toLocaleString() : 'N/A'}
                       </td>
                     </tr>
                   );

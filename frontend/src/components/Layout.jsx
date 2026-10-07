@@ -24,7 +24,7 @@ import {
 export default function Layout({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { getActiveProject, projects, activeProjectId, setActiveProjectId, currentUser, logout, fetchProjects } = useProjectStore();
+  const { getActiveProject, projects, activeProjectId, setActiveProjectId, currentUser, logout, fetchProjects, error, clearError, loading, fetchProjectDetails, fetchProjectJobs } = useProjectStore();
   
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
@@ -32,17 +32,26 @@ export default function Layout({ children }) {
   const activePath = location.pathname;
 
   useEffect(() => {
-    fetchProjects();
+    fetchProjects().catch(() => {});
   }, [fetchProjects]);
 
-  const isWorkspacePath = activePath !== '/' && activePath !== '/create' && activePath !== '/login';
+  const isWorkspacePath = activePath !== '/' && activePath !== '/create-project' && activePath !== '/login' && activePath !== '/settings';
   const showSidebar = activeProjectId && isWorkspacePath;
+
+  useEffect(() => {
+    if (!activeProject.id || activeProject.status !== 'Training') return;
+    const interval = setInterval(() => {
+      fetchProjectDetails(activeProject.id).catch(() => {});
+      fetchProjectJobs(activeProject.id);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [activeProject.id, activeProject.status, fetchProjectDetails, fetchProjectJobs]);
 
   const navLinks = [
     { name: 'Project Overview', path: '/overview', icon: FolderKanban },
     { name: 'Timeline Auditing', path: '/timeline', icon: GitCommit },
     { name: 'Dataset Intelligence', path: '/dataset', icon: Database },
-    { name: 'AI Assistant', path: '/assistant', icon: MessageSquare },
+    { name: 'Chat Assistant', path: '/assistant', icon: MessageSquare },
     { name: 'EDA', path: '/eda', icon: BarChart3 },
     { name: 'Feature Engineering', path: '/features', icon: Sliders },
     { name: 'Training & HPO', path: '/training', icon: Cpu },
@@ -66,13 +75,13 @@ export default function Layout({ children }) {
             </button>
           )}
           
-          {/* AIDSO Clickable Logo */}
+          {/* DSOS Clickable Logo */}
           <Link to="/" className="flex items-center gap-2 cursor-pointer group">
             <div className="bg-brand-primary p-1.5 rounded-lg flex items-center justify-center group-hover:scale-105 transition-transform">
               <BrainCircuit className="w-6 h-6 text-white" />
             </div>
             <span className="font-display font-bold text-xl tracking-tight bg-gradient-to-r from-violet-400 via-indigo-200 to-purple-400 bg-clip-text text-transparent group-hover:opacity-90 transition-opacity">
-              AIDSO
+              DSOS
             </span>
             <span className="text-[10px] uppercase font-mono tracking-widest text-brand-primary font-bold px-1.5 py-0.5 rounded bg-brand-primary/10 border border-brand-primary/20">
               v1.0
@@ -90,13 +99,16 @@ export default function Layout({ children }) {
           )}
 
           {currentUser && (
+            <>
+            <Link to="/settings" className="text-zinc-400 text-sm mr-4">System Status</Link>
             <button
-              onClick={() => { logout(); navigate('/login'); }}
+              onClick={async () => { try { await logout(); } finally { navigate('/login'); } }}
               className="p-2 hover:bg-red-500/10 hover:text-red-400 border border-transparent hover:border-red-500/20 text-zinc-400 rounded-xl transition-all cursor-pointer"
               title="Logout"
             >
               <LogOut className="w-4 h-4" />
             </button>
+            </>
           )}
         </div>
       </header>
@@ -143,8 +155,8 @@ export default function Layout({ children }) {
                     <span>Gemini Engine</span>
                   </div>
                   <p className="text-zinc-500 leading-relaxed font-mono">
-                    Understanding: Active<br/>
-                    Drift Audit: 30s intervals
+                    Project context summaries<br/>
+                    Drift: compare uploaded data
                   </p>
                 </div>
               </div>
@@ -154,7 +166,9 @@ export default function Layout({ children }) {
 
         {/* Main Content Area */}
         <main className="flex-1 p-4 lg:p-6 overflow-y-auto max-h-[calc(100vh-4rem)] w-full">
-          {children}
+          {error && <div role="alert" className="mb-4 p-3 rounded-xl border border-red-500/30 text-red-300">{error} <button onClick={clearError} className="ml-3 underline">Dismiss</button></div>}
+            {loading && <p className="text-zinc-400 mb-3">Loading projects...</p>}
+            {!loading && !activeProject.id && isWorkspacePath && activePath !== '/create-project' ? <Link to="/create-project" className="text-violet-300">Create a project to get started.</Link> : children}
         </main>
       </div>
     </div>

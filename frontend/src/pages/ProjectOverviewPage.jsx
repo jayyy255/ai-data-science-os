@@ -43,6 +43,7 @@ export default function ProjectOverviewPage() {
         </p>
       </div>
 
+      {project.bestMse != null && <p className="text-emerald-300">Test Mean Squared Error: {project.bestMse.toFixed(4)}</p>}
       {/* Statistics Cards Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-brand-dark-surface p-4 rounded-xl border border-brand-dark-border text-center">
@@ -79,15 +80,15 @@ export default function ProjectOverviewPage() {
                 <span className="text-zinc-500">Champion Model</span>
                 <span className="font-semibold text-violet-300 font-mono">{project.bestModel}</span>
               </div>
-              {project.bestF1 && (
+              {project.bestF1 != null && (
                 <div className="flex justify-between items-center">
-                  <span className="text-zinc-500">Validation F1 Score</span>
+                  <span className="text-zinc-500">Test F1 Score</span>
                   <span className="font-semibold text-emerald-400 font-mono">{project.bestF1}</span>
                 </div>
               )}
-              {project.bestAccuracy && (
+              {project.bestAccuracy != null && (
                 <div className="flex justify-between items-center">
-                  <span className="text-zinc-500">Validation Accuracy</span>
+                  <span className="text-zinc-500">Test Accuracy</span>
                   <span className="font-semibold text-zinc-300 font-mono">{project.bestAccuracy}</span>
                 </div>
               )}

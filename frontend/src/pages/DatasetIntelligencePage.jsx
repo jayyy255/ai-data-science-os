@@ -90,7 +90,7 @@ export default function DatasetIntelligencePage() {
             <div>
               <span className="text-xs font-mono uppercase text-zinc-500">Class Balance</span>
               <p className="text-sm font-semibold text-zinc-200 mt-0.5">{health.classImbalance}</p>
-              <p className="text-xs text-zinc-500 mt-1">SMOTE oversampling config will apply in Kafka training</p>
+              <p className="text-xs text-zinc-500 mt-1">Class balance is reported from the uploaded target values.</p>
             </div>
           </div>
         </div>

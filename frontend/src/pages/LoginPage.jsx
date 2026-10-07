@@ -1,14 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/useProjectStore';
 import { BrainCircuit, KeyRound, Mail, ShieldCheck, User, AlertCircle, CheckCircle } from 'lucide-react';
-
+ 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const currentUser = useProjectStore((state) => state.currentUser);
   const login = useProjectStore((state) => state.login);
   const signup = useProjectStore((state) => state.signup);
   const forgotPassword = useProjectStore((state) => state.forgotPassword);
   
+  useEffect(() => {
+    if (currentUser) {
+      navigate('/');
+    }
+  }, [currentUser, navigate]);
+
   const [isSignup, setIsSignup] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   
@@ -98,7 +105,7 @@ export default function LoginPage() {
               <BrainCircuit className="w-10 h-10 text-violet-400" />
             </div>
             <h1 className="font-display font-extrabold text-3xl tracking-tight bg-gradient-to-r from-violet-400 via-indigo-200 to-purple-400 bg-clip-text text-transparent">
-              AIDSO
+              DSO
             </h1>
           </div>
           <div className="space-y-4">
@@ -106,7 +113,7 @@ export default function LoginPage() {
               Turn Raw Data into Explainable Models
             </h2>
             <p className="text-zinc-400 leading-relaxed text-sm">
-              AIDSO is a memory-driven, local-first Operating System for Data Scientists. Track experiments, manage data quality, run HPO trials via Kafka, and explain model decisions automatically.
+              DSO is a memory-driven, local-first Operating System for Data Scientists. Track experiments, manage data quality, run HPO trials, and explain model decisions automatically.
             </p>
           </div>
 
@@ -116,8 +123,8 @@ export default function LoginPage() {
               <p className="text-xs font-semibold text-zinc-300">S3 / MinIO Storage</p>
             </div>
             <div className="bg-brand-dark-surface/40 p-4 rounded-xl border border-brand-dark-border/30">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase">Event Loop</span>
-              <p className="text-xs font-semibold text-zinc-300">Kafka Workers</p>
+              <span className="text-[10px] font-mono text-zinc-500 uppercase">Task Queue</span>
+              <p className="text-xs font-semibold text-zinc-300">Postgres Worker</p>
             </div>
           </div>
         </div>
@@ -331,7 +338,7 @@ export default function LoginPage() {
           {/* Footer Security Badge */}
           <div className="text-center pt-2 flex items-center justify-center gap-1.5 text-[10px] text-zinc-500 font-mono">
             <ShieldCheck className="w-3.5 h-3.5 text-zinc-600" />
-            <span>Redis Session Cache & JWT Auth Enabled</span>
+            <span>Authenticated sessions & project isolation</span>
           </div>
         </div>
       </div>

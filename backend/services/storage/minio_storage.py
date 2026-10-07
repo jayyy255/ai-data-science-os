@@ -2,6 +2,7 @@ import os
 import boto3
 from botocore.client import Config
 from services.storage.base import StorageProvider
+from urllib.parse import quote
 
 class MinIOStorage(StorageProvider):
     def __init__(self):
@@ -10,8 +11,11 @@ class MinIOStorage(StorageProvider):
         secret_key = os.getenv("MINIO_SECRET_KEY", "password123")
         
         self.bucket_name = "aidso-runs"
-        self.local_fallback_dir = "./tmp/minio_fallback"
+        self.local_fallback_dir = os.getenv('LOCAL_STORAGE_DIR', './tmp/minio_fallback')
         os.makedirs(self.local_fallback_dir, exist_ok=True)
+        if not os.getenv('MINIO_ENDPOINT'):
+            self.client_enabled = False
+            return
         
         try:
             self.s3 = boto3.client(
@@ -19,11 +23,17 @@ class MinIOStorage(StorageProvider):
                 endpoint_url=f"http://{endpoint}",
                 aws_access_key_id=access_key,
                 aws_secret_access_key=secret_key,
-                config=Config(signature_version='s3v4'),
+                config=Config(signature_version='s3v4', connect_timeout=1, read_timeout=3, retries={'max_attempts': 0}),
                 region_name='us-east-1'
             )
             # Ensure bucket exists
-            self.s3.create_bucket(Bucket=self.bucket_name)
+            try:
+                self.s3.head_bucket(Bucket=self.bucket_name)
+            except Exception as error:
+                if getattr(error, 'response', {}).get('Error', {}).get('Code') in {'404', 'NoSuchBucket'}:
+                    self.s3.create_bucket(Bucket=self.bucket_name)
+                else:
+                    raise
             self.client_enabled = True
         except Exception as e:
             print(f"MinIO client initialization failed (falling back to local directories): {e}")
@@ -166,7 +176,7 @@ class MinIOStorage(StorageProvider):
         
         # Fallback simulating direct upload URL pointing to the dev server upload endpoint
         return {
-            "url": f"http://localhost:8000/api/projects/upload-local?filename={filename}",
+            "url": f"/api/projects/upload-local?filename={quote(filename)}",
             "method": "POST",
             "fields": {},
             "s3_path": f"file://{os.path.abspath(os.path.join(self.local_fallback_dir, filename))}"
@@ -190,6 +200,6 @@ class MinIOStorage(StorageProvider):
         # Fallback to local files via proxy
         if path.startswith("file://"):
             filename = os.path.basename(path)
-            return f"http://localhost:8000/api/projects/download-local-file?filename={filename}"
+            return f"/api/projects/download-local-file?filename={quote(filename)}"
             
         return path

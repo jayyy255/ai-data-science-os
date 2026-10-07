@@ -16,6 +16,7 @@ class Project(Base):
     status = Column(String, default='Created')  # Created, EDA, Preprocessed, Training, Ready
     dataset_path = Column(String, nullable=True)
     eda_profile_json = Column(JSON, nullable=True)
+    eda_analysis = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -62,6 +63,7 @@ class KnowledgeCard(Base):
     best_model = Column(String, nullable=True)
     best_f1 = Column(Float, nullable=True)
     best_accuracy = Column(Float, nullable=True)
+    best_mse = Column(Float, nullable=True)
     rows_count = Column(Integer, default=0)
     columns_count = Column(Integer, default=0)
     missing_values_pct = Column(Float, default=0.0)
@@ -118,3 +120,8 @@ class TrainingJob(Base):
     imputation_method = Column(String, nullable=False, default='Median')
 
     project = relationship("Project")
+
+class WorkerHeartbeat(Base):
+    __tablename__ = 'worker_heartbeats'
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)

@@ -55,7 +55,7 @@ export default function DashboardPage() {
             <span className="text-xs font-mono uppercase text-zinc-500">Compute Queue</span>
             <h3 className="text-sm font-semibold text-emerald-400 mt-1 flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-              GPU Workers Idle
+              {projects.filter(p => p.status === 'Training').length} Active Jobs
             </h3>
           </div>
           <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
@@ -65,8 +65,8 @@ export default function DashboardPage() {
 
         <div className="bg-brand-dark-surface p-4 rounded-xl border border-brand-dark-border flex items-center justify-between">
           <div>
-            <span className="text-xs font-mono uppercase text-zinc-500">Kafka Streaming</span>
-            <h3 className="text-sm font-semibold text-zinc-300 mt-1">2 Workers Online</h3>
+            <span className="text-xs font-mono uppercase text-zinc-500">Training Backend</span>
+            <h3 className="text-sm font-semibold text-zinc-300 mt-1">Database Queue</h3>
           </div>
           <div className="p-2.5 rounded-lg bg-zinc-500/10 border border-zinc-500/20 text-zinc-400">
             <Database className="w-5 h-5" />

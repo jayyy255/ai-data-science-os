@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
 import { Send, Sparkles, BrainCircuit, User, ArrowRight, BookOpen, AlertTriangle } from 'lucide-react';
-import axios from 'axios';
+import api from '../api';
 
 
 export default function AiAssistantPage() {
@@ -14,10 +14,10 @@ export default function AiAssistantPage() {
   const messagesEndRef = useRef(null);
 
   const suggestionChips = [
-    'Why was XGBoost selected?',
+    'Why was the champion model selected?',
     'What preprocessing was applied?',
-    'Which features influence churn most?',
-    'Why was tenure imputed with median?'
+    `Which features influence ${project.targetVariable} most?`,
+    'What data quality issues need attention?'
   ];
 
   useEffect(() => {
@@ -29,7 +29,7 @@ export default function AiAssistantPage() {
   }, [messages, loading]);
 
   const handleSend = async (textToSend) => {
-    if (!textToSend.trim()) return;
+    if (!textToSend.trim() || loading || !project.id) return;
 
     // Add user message
     const userMsg = { sender: 'user', text: textToSend };
@@ -39,8 +39,7 @@ export default function AiAssistantPage() {
     setLoading(true);
 
     try {
-      const API_BASE = '/api';
-      const res = await axios.post(`${API_BASE}/projects/${project.id}/chat`, {
+      const res = await api.post(`/projects/${project.id}/chat`, {
         question: textToSend
       });
       let responseText = res.data.answer;
@@ -51,7 +50,7 @@ export default function AiAssistantPage() {
       setLoading(false);
     } catch (err) {
       console.warn("Backend API chat failed.", err);
-      const errMsg = { sender: 'ai', text: "Failed to connect to AI Assistant. Please check if your backend container is running and contains a valid GEMINI_API_KEY in the environment." };
+      const errMsg = { sender: 'ai', text: "Failed to connect to Chat Assistant. Please check if your backend container is running and contains a valid GEMINI_API_KEY in the environment." };
       setMessages(prev => [...prev, errMsg]);
       addChatMessage(project.id, errMsg);
       setLoading(false);
@@ -83,21 +82,21 @@ export default function AiAssistantPage() {
               </div>
               <div className="flex justify-between items-center text-[10px] font-mono">
                 <span className="text-zinc-500">F1 Champion</span>
-                <span className="text-emerald-400 font-bold">{project.bestF1 || 'N/A'}</span>
+                <span className="text-emerald-400 font-bold">{(project.problemType === 'regression' ? project.bestMse : project.bestF1) ?? 'N/A'}</span>
               </div>
             </div>
 
             <div className="flex items-start gap-2 bg-brand-primary/5 border border-brand-primary/10 p-3 rounded-xl">
               <AlertTriangle className="w-4 h-4 text-brand-primary flex-shrink-0 mt-0.5" />
               <p className="text-[10px] text-zinc-400 leading-relaxed">
-                Assistant queries utilize LangGraph agents. Grounding context prevents hallucinations by enforcing limits to the Knowledge Card keys.
+                Assistant queries utilize context grounding. Grounding context prevents hallucinations by enforcing limits to the Knowledge Card keys.
               </p>
             </div>
           </div>
         </div>
 
         <div className="pt-4 border-t border-brand-dark-border/40 text-[10px] text-zinc-500 font-mono text-center">
-          Model: gemini-1.5-flash-002
+          Model: gemini-2.5-flash
         </div>
       </div>
 
@@ -109,7 +108,7 @@ export default function AiAssistantPage() {
             <BrainCircuit className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-zinc-200">LangGraph Assistant</h3>
+            <h3 className="text-sm font-semibold text-zinc-200">Chat Assistant</h3>
             <p className="text-[10px] font-mono text-zinc-500">Semantic retrieval active over PostgreSQL logs</p>
           </div>
         </div>
@@ -190,7 +189,7 @@ export default function AiAssistantPage() {
               value={inputMsg}
               onChange={(e) => setInputMsg(e.target.value)}
               className="flex-1 bg-brand-dark-bg border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2 px-4 rounded-xl text-sm font-medium transition-all"
-              placeholder="Ask Assistant about HPO trials or metrics..."
+              placeholder="Ask about HPO trials or metrics..."
               disabled={loading}
             />
             <button

@@ -7,12 +7,12 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from database.connection import get_db
-from database.models import Project, DecisionMemory, TimelineEvent, KnowledgeCard
+from database.models import Project, DecisionMemory, TimelineEvent, KnowledgeCard, User, TrainingJob
 from services.dataset import DatasetService
 from services.gemini import GeminiService
 from services.storage.factory import get_storage_provider
 from services.cache import RedisCacheService
-from services.security import validate_csv_content, scan_file_for_virus
+from services.security import validate_csv_content, scan_file_for_virus, get_current_user
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -28,26 +28,41 @@ class PresignedUrlRequest(BaseModel):
     filename: str
 
 @router.post("/presigned-upload-url")
-def get_presigned_upload_url(payload: PresignedUrlRequest):
+def get_presigned_upload_url(payload: PresignedUrlRequest, current_user: User = Depends(get_current_user)):
     try:
-        res = storage.generate_presigned_upload_url(payload.filename)
+        res = storage.generate_presigned_upload_url(current_user.username + "_" + __import__("uuid").uuid4().hex + "_" + os.path.basename(payload.filename))
         return res
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate presigned upload URL: {e}")
 
 @router.post("/upload-local")
-async def upload_local_file(filename: str, file: UploadFile = File(...)):
+async def upload_local_file(filename: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    if os.path.basename(filename) != filename or not filename.startswith(current_user.username + '_'):
+        raise HTTPException(status_code=400, detail='Invalid upload name')
     try:
-        content = await file.read()
+        content = await file.read(50 * 1024 * 1024 + 1)
+        if len(content) > 50 * 1024 * 1024: raise HTTPException(status_code=400, detail='Maximum dataset size is 50MB')
+        if not filename.lower().endswith('.csv'): raise HTTPException(status_code=400, detail='Only CSV files are allowed')
+        try: validate_csv_content(content)
+        except ValueError as error: raise HTTPException(status_code=400, detail=str(error))
         path = storage.upload_dataset(filename, content)
         return {"status": "success", "s3_path": path}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload local file: {e}")
 
 @router.get("/download-local-file")
-def download_local_file(filename: str):
+def download_local_file(filename: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if os.path.basename(filename) != filename:
+        raise HTTPException(status_code=400, detail='Invalid filename')
+    owned = db.query(Project).filter(Project.username == current_user.username).all()
+    if not any(filename == os.path.basename(p.dataset_path or '') or filename.startswith(p.id + '_') or filename.startswith('imputed_' + os.path.basename(p.dataset_path or '').removesuffix('.csv')) for p in owned):
+        raise HTTPException(status_code=404, detail='File not found')
     try:
-        filepath = os.path.join("./tmp/minio_fallback", filename)
+        filepath = os.path.join(storage.local_fallback_dir, filename)
         if not os.path.exists(filepath):
             raise HTTPException(status_code=404, detail="Local file not found")
         with open(filepath, 'rb') as f:
@@ -57,14 +72,16 @@ def download_local_file(filename: str):
             media_type="application/octet-stream",
             headers={"content-disposition": f"attachment; filename={filename}"}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{project_id}/presigned-download-dataset")
-def get_presigned_download_dataset(project_id: str, imputation_method: str = None, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+def get_presigned_download_dataset(project_id: str, imputation_method: str = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id, Project.username == current_user.username).first()
     if not project or not project.dataset_path:
-        raise HTTPException(status_code=404, detail="Dataset not found for this project")
+        raise HTTPException(status_code=404, detail="Dataset not found or unauthorized")
     try:
         path = project.dataset_path
         if imputation_method:
@@ -72,7 +89,9 @@ def get_presigned_download_dataset(project_id: str, imputation_method: str = Non
             import pandas as pd
             df = pd.read_csv(io.BytesIO(raw_bytes))
             
-            df = apply_imputation(df, imputation_method)
+            target_values = df[project.target_variable].copy()
+            df = apply_imputation(df.drop(columns=[project.target_variable]), imputation_method)
+            df[project.target_variable] = target_values
             
             out = io.StringIO()
             df.to_csv(out, index=False)
@@ -85,12 +104,14 @@ def get_presigned_download_dataset(project_id: str, imputation_method: str = Non
             
         signed_url = storage.generate_presigned_download_url(path)
         return {"url": signed_url}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate presigned download URL: {e}")
 
 @router.get("/{project_id}/presigned-download-model")
-def get_presigned_download_model(project_id: str, model_name: str = None, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+def get_presigned_download_model(project_id: str, model_name: str = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id, Project.username == current_user.username).first()
     card = db.query(KnowledgeCard).filter(KnowledgeCard.project_id == project_id).first()
     if not project or not card or not card.model_path:
         raise HTTPException(status_code=404, detail="Model binary not found for this project")
@@ -101,12 +122,14 @@ def get_presigned_download_model(project_id: str, model_name: str = None, db: Se
         if path.startswith("s3://"):
             path = f"s3://aidso-runs/models/{project_id}/{m_slug}.pkl"
         elif path.startswith("file://"):
-            folder = re.sub(r'/[^/]+\.pkl$', '', path)
-            path = f"{folder}/{project_id}_{m_slug}.pkl"
+            folder = os.path.dirname(path[7:])
+            path = 'file://' + os.path.join(folder, f'{project_id}_{m_slug}.pkl')
             
     try:
         signed_url = storage.generate_presigned_download_url(path)
         return {"url": signed_url}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate presigned download URL: {e}")
 
@@ -114,21 +137,26 @@ def get_presigned_download_model(project_id: str, model_name: str = None, db: Se
 async def create_project(
     name: str = Form(...),
     target_variable: str = Form(...),
-    description: str = Form(...),
-    username: str = Form(None),
+    description: str = Form(''),
+    problem_type: str = Form('auto'),
     dataset_path: str = Form(None),
     file: UploadFile = File(None),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     s3_path = dataset_path
     filename = "dataset.csv"
     if file:
-        if not file.filename.endswith('.csv'):
+        if not file.filename.lower().endswith('.csv'):
             raise HTTPException(status_code=400, detail="Only CSV files are allowed.")
-        file_bytes = await file.read()
+        file_bytes = await file.read(50 * 1024 * 1024 + 1)
+        if len(file_bytes) > 50 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail='Maximum dataset size is 50MB')
         filename = file.filename
-        s3_path = storage.upload_dataset(filename, file_bytes)
+        s3_path = storage.upload_dataset(f"{current_user.username}_{__import__('uuid').uuid4().hex}_{os.path.basename(filename)}", file_bytes)
     elif dataset_path:
+        if not os.path.basename(dataset_path).startswith(current_user.username + '_') or (dataset_path.startswith('file://') and os.path.commonpath([os.path.abspath(dataset_path[7:]), os.path.abspath('./tmp/minio_fallback')]) != os.path.abspath('./tmp/minio_fallback')):
+            raise HTTPException(status_code=400, detail='Dataset must be uploaded by the current user')
         filename = dataset_path.split("/")[-1]
         try:
             file_bytes = storage.download_file(dataset_path)
@@ -154,25 +182,28 @@ async def create_project(
         )
 
     # Enforce file size limit
-    MAX_FILE_SIZE = 100 * 1024 * 1024 # 100 MB
+    MAX_FILE_SIZE = 50 * 1024 * 1024
     if len(file_bytes) > MAX_FILE_SIZE:
         if s3_path:
             storage.delete_file(s3_path)
         raise HTTPException(
             status_code=400, 
-            detail=f"File exceeds maximum allowed size of 100MB (actual: {len(file_bytes) / (1024*1024):.1f}MB)"
+            detail=f"File exceeds maximum allowed size of 50MB (actual: {len(file_bytes) / (1024*1024):.1f}MB)"
         )
 
     # Dataset Intelligence Service
-    profile = DatasetService.profile_dataset(file_bytes, target_variable)
+    try:
+        profile = DatasetService.profile_dataset(file_bytes, target_variable, problem_type)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
     
     # Enforce rows and columns limit
-    if profile.get("rows_count", 0) > 200000:
+    if profile.get("rows_count", 0) > 100000:
         if s3_path:
             storage.delete_file(s3_path)
         raise HTTPException(
             status_code=400,
-            detail=f"Dataset rows exceed maximum allowed limit of 200,000 (actual: {profile['rows_count']})"
+            detail=f"Dataset rows exceed maximum allowed limit of 100,000 (actual: {profile['rows_count']})"
         )
     if profile.get("columns_count", 0) > 200:
         if s3_path:
@@ -184,8 +215,17 @@ async def create_project(
 
     # Gemini AI Project Understanding Agent
     understanding = gemini.understand_project(name, description, target_variable)
+    understanding['problem_type'] = profile['problem_type']
+    understanding['target_variable'] = target_variable
+    understanding['recommended_metrics'] = ['rmse', 'mae', 'r2'] if profile['problem_type'] == 'regression' else ['f1_score', 'accuracy']
     
-    project_id = name.lower().replace(" ", "-")
+    # Generate the Gemini dataset summary analysis
+    eda_summary = gemini.analyze_eda_profile(name, profile)
+    
+    if not name.strip(): raise HTTPException(status_code=400, detail='Project name is required')
+    import uuid
+    project_id = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-') or 'project'
+    project_id += '-' + uuid.uuid4().hex[:10]
     db_project = Project(
         id=project_id,
         name=name,
@@ -194,8 +234,9 @@ async def create_project(
         description=description,
         status="EDA Phase",
         dataset_path=s3_path,
-        username=username,
-        eda_profile_json=profile
+        username=current_user.username,
+        eda_profile_json=profile,
+        eda_analysis=eda_summary
     )
     db.add(db_project)
     
@@ -203,14 +244,14 @@ async def create_project(
     db.add(TimelineEvent(
         project_id=project_id,
         title="Dataset Uploaded",
-        description=f"Raw dataset file {file.filename} uploaded successfully to local S3 bucket: {s3_path}",
+        description=f"Raw dataset file {filename} saved successfully to storage: {s3_path}",
         event_type="success"
     ))
     
     db.add(TimelineEvent(
         project_id=project_id,
         title="Project Understood",
-        description=f"Gemini classified task as {understanding.get('problem_type')} targeting '{target_variable}'. Suggested metrics: {', '.join(understanding.get('recommended_metrics', []))}",
+        description=f"Dataset task identified as {understanding.get('problem_type')} targeting '{target_variable}'. Suggested metrics: {', '.join(understanding.get('recommended_metrics', []))}",
         event_type="info"
     ))
 
@@ -221,7 +262,7 @@ async def create_project(
         rows_count=profile["rows_count"],
         columns_count=profile["columns_count"],
         missing_values_pct=profile["missing_pct"],
-        balancing_method="SMOTE" if profile["is_imbalanced"] != "None" else "None",
+        balancing_method="None",
         models_tested_count=0,
         numerical_count=profile["numerical_count"],
         categorical_count=profile["categorical_count"],
@@ -231,7 +272,6 @@ async def create_project(
             'LightGBM': { 'status': 'Idle', 'metric': None },
             'Random Forest': { 'status': 'Idle', 'metric': None },
             'Neural Network': { 'status': 'Idle', 'metric': None },
-            'Tabular Transformer': { 'status': 'Idle', 'metric': None }
         },
         status="EDA Phase"
     )
@@ -284,24 +324,32 @@ async def create_project(
     }
 
 @router.get("")
-def list_projects(username: str = None, db: Session = Depends(get_db)):
-    query = db.query(Project)
-    if username:
-        query = query.filter(Project.username == username)
-    else:
-        query = query.filter(Project.username == None)
+def list_projects(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query = db.query(Project).filter(Project.username == current_user.username)
     return query.all()
 
 @router.get("/{project_id}")
-def get_project(project_id: str, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+def get_project(project_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.username == current_user.username
+    ).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Project not found or unauthorized")
     
     # Fetch cached EDA profile from Redis with DB fallback
     cached_eda = cache.get_cached_eda(project_id)
     if not cached_eda:
         cached_eda = project.eda_profile_json
+        
+    eda_analysis = project.eda_analysis
+    if not eda_analysis and cached_eda:
+        try:
+            eda_analysis = gemini.analyze_eda_profile(project.name, cached_eda)
+            project.eda_analysis = eda_analysis
+            db.commit()
+        except Exception:
+            pass
     
     decisions = db.query(DecisionMemory).filter(DecisionMemory.project_id == project_id).all()
     timeline = db.query(TimelineEvent).filter(TimelineEvent.project_id == project_id).order_by(TimelineEvent.timestamp.desc()).all()
@@ -312,44 +360,30 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
         "decisions": decisions,
         "timeline": timeline,
         "knowledge_card": card,
-        "cached_eda": cached_eda
+        "cached_eda": cached_eda,
+        "eda_analysis": eda_analysis,
+        "hpo_trials": (db.query(TrainingJob).filter(TrainingJob.project_id == project_id, TrainingJob.status == 'completed').order_by(TrainingJob.id.desc()).first().metrics_json or {}).get('hpo_trials', []) if db.query(TrainingJob).filter(TrainingJob.project_id == project_id, TrainingJob.status == 'completed').first() else []
     }
 
 @router.post("/{project_id}/override")
-def apply_override(project_id: str, payload: DecisionOverride, db: Session = Depends(get_db)):
-    dec = db.query(DecisionMemory).filter(
-        DecisionMemory.project_id == project_id, 
-        DecisionMemory.feature_name == payload.feature_name
+def apply_override(project_id: str, payload: DecisionOverride, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.username == current_user.username
     ).first()
-    
-    if not dec:
-        dec = DecisionMemory(
-            project_id=project_id,
-            feature_name=payload.feature_name,
-            decision="User Choice Applied",
-            reason="User Override Action",
-            confidence=1.0
-        )
-        db.add(dec)
-
-    dec.override_active = True
-    dec.user_choice = payload.user_choice
-    
-    db.add(TimelineEvent(
-        project_id=project_id,
-        title="User Override Applied",
-        description=f"Feature '{payload.feature_name}' transformation overridden to: {payload.user_choice}",
-        event_type="warning"
-    ))
-    db.commit()
-    return {"status": "success", "decision": dec}
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+    return transform_feature(project_id, TransformFeaturePayload(feature_name=payload.feature_name, transformation=payload.user_choice), current_user, db)
 
 @router.get("/{project_id}/download-model")
-def download_model(project_id: str, model_name: str = None, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+def download_model(project_id: str, model_name: str = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.username == current_user.username
+    ).first()
     card = db.query(KnowledgeCard).filter(KnowledgeCard.project_id == project_id).first()
     if not project or not card or not card.model_path:
-        raise HTTPException(status_code=404, detail="Model binary not found for this project")
+        raise HTTPException(status_code=404, detail="Model binary not found or unauthorized")
         
     try:
         path = card.model_path
@@ -358,15 +392,12 @@ def download_model(project_id: str, model_name: str = None, db: Session = Depend
             if path.startswith("s3://"):
                 path = f"s3://aidso-runs/models/{project_id}/{m_slug}.pkl"
             elif path.startswith("file://"):
-                import re
-                folder = re.sub(r'/[^/]+\.pkl$', '', path)
-                path = f"{folder}/{project_id}_{m_slug}.pkl"
+                folder = os.path.dirname(path[7:])
+                path = 'file://' + os.path.join(folder, f'{project_id}_{m_slug}.pkl')
                 
         model_bytes = storage.download_file(path)
         
         # Parse dataset name from project.dataset_path
-        import os
-        import re
         dataset_name = "dataset"
         if project.dataset_path:
             dataset_name = os.path.basename(project.dataset_path).replace(".csv", "")
@@ -384,54 +415,37 @@ def download_model(project_id: str, model_name: str = None, db: Session = Depend
             media_type="application/octet-stream",
             headers={"content-disposition": f"attachment; filename={filename}"}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve model binary: {e}")
 
 
 def apply_imputation(df, method: str):
     import numpy as np
-    import pandas as pd
-    df_copy = df.copy()
-    
-    if method == 'KNN':
-        try:
-            from sklearn.impute import KNNImputer
-            num_cols = df_copy.select_dtypes(include=[np.number]).columns.tolist()
-            if len(num_cols) > 0:
-                imputer = KNNImputer(n_neighbors=min(5, len(df_copy)))
-                df_copy[num_cols] = imputer.fit_transform(df_copy[num_cols])
-        except Exception as e:
-            print(f"KNN Imputer failed, falling back to interpolation: {e}")
-            for col in df_copy.columns:
-                if df_copy[col].isnull().sum() > 0 and df_copy[col].dtype in ['int64', 'float64', 'float32', 'int32']:
-                    df_copy[col] = df_copy[col].interpolate().fillna(df_copy[col].mean())
-    else:
-        for col in df_copy.columns:
-            if df_copy[col].isnull().sum() > 0:
-                if df_copy[col].dtype in ['int64', 'float64', 'float32', 'int32']:
-                    if method == 'Mean':
-                        df_copy[col] = df_copy[col].fillna(df_copy[col].mean())
-                    elif method == 'Mode':
-                        df_copy[col] = df_copy[col].fillna(df_copy[col].mode().iloc[0] if not df_copy[col].mode().empty else 0)
-                    else: # Median (Default)
-                        df_copy[col] = df_copy[col].fillna(df_copy[col].median())
-                else:
-                    df_copy[col] = df_copy[col].fillna(df_copy[col].mode().iloc[0] if not df_copy[col].mode().empty else "Missing")
-                    
-    # Ensure any remaining missing values are filled
-    for col in df_copy.columns:
-        if df_copy[col].isnull().sum() > 0:
-            df_copy[col] = df_copy[col].fillna(df_copy[col].mode().iloc[0] if not df_copy[col].mode().empty else "Missing")
-            
-    return df_copy
+    from sklearn.impute import SimpleImputer, KNNImputer
+    if method not in {'Median', 'Mean', 'Mode', 'KNN'}:
+        raise HTTPException(status_code=400, detail='Unsupported imputation method')
+    output = df.copy().replace([np.inf, -np.inf], np.nan)
+    numeric = output.select_dtypes(include=np.number).columns.tolist()
+    if numeric:
+        imputer = KNNImputer(n_neighbors=5, keep_empty_features=True) if method == 'KNN' else SimpleImputer(strategy={'Median':'median', 'Mean':'mean', 'Mode':'most_frequent'}[method], keep_empty_features=True)
+        output[numeric] = imputer.fit_transform(output[numeric])
+    for column in output.columns.difference(numeric):
+        mode = output[column].mode()
+        output[column] = output[column].fillna(mode.iloc[0] if len(mode) else 'Missing')
+    return output
 
 
 @router.get("/{project_id}/download-dataset")
-def download_dataset(project_id: str, imputation_method: str = "Median", db: Session = Depends(get_db)):
+def download_dataset(project_id: str, imputation_method: str = "Median", current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     import pandas as pd
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.username == current_user.username
+    ).first()
     if not project or not project.dataset_path:
-        raise HTTPException(status_code=404, detail="Dataset not found for this project")
+        raise HTTPException(status_code=404, detail="Dataset not found or unauthorized")
         
     try:
         # Load raw dataset from S3/MinIO
@@ -439,7 +453,8 @@ def download_dataset(project_id: str, imputation_method: str = "Median", db: Ses
         df = pd.read_csv(io.BytesIO(file_bytes))
         
         # Apply imputation method
-        modified_df = apply_imputation(df, imputation_method)
+        modified_df = apply_imputation(df.drop(columns=[project.target_variable]), imputation_method)
+        modified_df[project.target_variable] = df[project.target_variable]
         
         # Export to CSV bytes
         out_buf = io.StringIO()
@@ -452,6 +467,8 @@ def download_dataset(project_id: str, imputation_method: str = "Median", db: Ses
             media_type="text/csv",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process and download dataset: {e}")
 
@@ -462,228 +479,105 @@ class TransformFeaturePayload(BaseModel):
 
 
 @router.post("/{project_id}/transform")
-def transform_feature(project_id: str, payload: TransformFeaturePayload, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+def transform_feature(project_id: str, payload: TransformFeaturePayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.username == current_user.username
+    ).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Project not found or unauthorized")
         
+    if db.query(TrainingJob).filter(TrainingJob.project_id == project_id, TrainingJob.status.in_(['queued', 'running'])).first():
+        raise HTTPException(status_code=409, detail='Wait for training to finish before changing transformations')
+    from services.preprocessing import CHOICES, transformed_preview
+    import pandas as pd
+    import numpy as np
+    df = pd.read_csv(io.BytesIO(storage.download_file(project.dataset_path)))
+    feature = payload.feature_name
+    if feature == project.target_variable or feature not in df.columns:
+        raise HTTPException(status_code=400, detail='Choose a predictor column, not the target')
+    records = db.query(DecisionMemory).filter(DecisionMemory.project_id == project_id).all()
+    dec = next((d for d in records if d.feature_name == feature), None)
+    if not dec: raise HTTPException(status_code=400, detail='Unknown feature')
+    choice = dec.decision if payload.transformation == 'recommended' else payload.transformation
+    if choice not in CHOICES: raise HTTPException(status_code=400, detail='Unsupported transformation')
+    choices = {d.feature_name: (d.user_choice if d.override_active else d.decision) for d in records}
+    choices[feature] = choice
     try:
-        # 1. Download current raw/transformed dataset from storage
-        # Check if transformed already exists, otherwise download original raw dataset
-        filename = f"{project_id}_transformed.csv"
-        if hasattr(storage, "bucket_name"):
-            path = f"s3://{storage.bucket_name}/datasets/{filename}"
-        else:
-            path = f"file://{os.path.abspath(os.path.join('./tmp/minio_fallback', filename))}"
-            
-        try:
-            file_bytes = storage.download_file(path)
-            print(f"Loading already transformed dataset from {path}")
-        except Exception:
-            path = project.dataset_path
-            file_bytes = storage.download_file(path)
-            print(f"Loading raw base dataset from {path}")
-            
-        import pandas as pd
-        import numpy as np
-        import io
-        
-        df = pd.read_csv(io.BytesIO(file_bytes))
-        
-        # 2. Check if feature exists
-        feature_name = payload.feature_name
-        transformation = payload.transformation
-        
-        if feature_name not in df.columns:
-            raise HTTPException(status_code=400, detail=f"Feature '{feature_name}' not found in dataset")
-        if project.target_variable not in df.columns:
-            raise HTTPException(status_code=400, detail=f"Target variable '{project.target_variable}' not found in dataset")
-            
-        # Helper to convert series to numeric representation for Pearson correlation computation
-        def to_numeric_representation(series):
-            if series.isnull().all():
-                return pd.Series(0, index=series.index)
-            if series.dtype == 'object' or series.dtype.name == 'category' or series.dtype == 'bool':
-                return pd.Series(pd.factorize(series.fillna('Missing'))[0], index=series.index)
-            return pd.to_numeric(series.fillna(0), errors='coerce').fillna(0)
-            
-        target_numeric = to_numeric_representation(df[project.target_variable])
-        feat_before = df[feature_name]
-        feat_before_numeric = to_numeric_representation(feat_before)
-        
-        # Calculate correlation before
-        corr_before = feat_before_numeric.corr(target_numeric)
-        corr_before = 0.0 if pd.isna(corr_before) else float(np.abs(corr_before))
-        missing_before = int(feat_before.isnull().sum())
-        
-        # 3. Apply selected transformation
-        df_trans = df.copy()
-        val = df[feature_name]
-        val_trans = val.copy()
-        
-        if transformation == "Impute Median":
-            if val.dtype in [np.float64, np.float32, np.int64, np.int32]:
-                val_trans = val.fillna(val.median())
-            else:
-                val_trans = val.fillna(val.mode().iloc[0] if not val.mode().empty else "Missing")
-            df_trans[feature_name] = val_trans
-            
-        elif transformation == "Impute Mean":
-            if val.dtype in [np.float64, np.float32, np.int64, np.int32]:
-                val_trans = val.fillna(val.mean())
-            else:
-                val_trans = val.fillna(val.mode().iloc[0] if not val.mode().empty else "Missing")
-            df_trans[feature_name] = val_trans
-            
-        elif transformation == "Standard Scaling":
-            if val.dtype in [np.float64, np.float32, np.int64, np.int32]:
-                val_filled = val.fillna(val.median())
-            else:
-                val_filled = pd.Series(pd.factorize(val.fillna('Missing'))[0], index=val.index)
-            std_val = val_filled.std()
-            if std_val > 0:
-                val_trans = (val_filled - val_filled.mean()) / std_val
-            else:
-                val_trans = val_filled - val_filled.mean()
-            df_trans[feature_name] = val_trans
-            
-        elif transformation == "One-Hot Encoding":
-            dummies = pd.get_dummies(df[feature_name], prefix=feature_name, dtype=float)
-            df_trans = df_trans.drop(columns=[feature_name])
-            df_trans = pd.concat([df_trans, dummies], axis=1)
-            
-            # Find max absolute correlation of dummy columns
-            max_corr = 0.0
-            for col in dummies.columns:
-                c_numeric = to_numeric_representation(dummies[col])
-                corr_val = c_numeric.corr(target_numeric)
-                corr_val = 0.0 if pd.isna(corr_val) else float(np.abs(corr_val))
-                if corr_val > max_corr:
-                    max_corr = corr_val
-            corr_after = max_corr
-            val_trans = pd.Series(0, index=val.index)
-            
-        elif transformation == "Discretize Binning":
-            if val.dtype in [np.float64, np.float32, np.int64, np.int32]:
-                val_filled = val.fillna(val.median())
-            else:
-                val_filled = pd.Series(pd.factorize(val.fillna('Missing'))[0], index=val.index)
-            try:
-                val_trans = pd.qcut(val_filled, q=4, labels=False, duplicates='drop')
-            except Exception:
-                val_trans = pd.cut(val_filled, bins=4, labels=False)
-            df_trans[feature_name] = val_trans
-            
-        else: # Keep Raw / Apply AI Recommended / fallback
-            val_trans = val.copy()
-            df_trans[feature_name] = val_trans
-            
-        # Calculate correlation after (if not already set by One-Hot Encoding)
-        if transformation != "One-Hot Encoding":
-            feat_after_numeric = to_numeric_representation(val_trans)
-            corr_after = feat_after_numeric.corr(target_numeric)
-            corr_after = 0.0 if pd.isna(corr_after) else float(np.abs(corr_after))
-            missing_after = int(val_trans.isnull().sum())
-        else:
-            missing_after = 0
-            
-        improvement = corr_after - corr_before
-        better = improvement > 0.001 or (missing_before > 0 and missing_after == 0)
-        
-        comparison = {
-            "before_corr": round(corr_before, 4),
-            "after_corr": round(corr_after, 4),
-            "improvement": round(improvement, 4),
-            "before_missing": missing_before,
-            "after_missing": missing_after,
-            "better": bool(better)
-        }
-        
-        # 4. Upload the transformed dataset back to storage (overwriting the project transformed file)
-        out_buf = io.StringIO()
-        df_trans.to_csv(out_buf, index=False)
-        csv_bytes = out_buf.getvalue().encode("utf-8")
-        
-        transformed_filename = f"{project_id}_transformed.csv"
-        storage.upload_dataset(transformed_filename, csv_bytes)
-        
-        # 5. Update DecisionMemory database record
-        dec = db.query(DecisionMemory).filter(
-            DecisionMemory.project_id == project_id,
-            DecisionMemory.feature_name == feature_name
-        ).first()
-        
-        if not dec:
-            dec = DecisionMemory(
-                project_id=project_id,
-                feature_name=feature_name,
-                decision="User Choice Applied",
-                reason="User Override Action",
-                confidence=1.0
-            )
-            db.add(dec)
-            
-        dec.override_active = True
-        dec.user_choice = transformation
-        dec.comparison_metrics_json = comparison
-        
-        db.add(TimelineEvent(
-            project_id=project_id,
-            title="Feature Transformed",
-            description=f"Applied {transformation} on '{feature_name}'. Target correlation: {round(corr_before, 3)} -> {round(corr_after, 3)}.",
-            event_type="success"
-        ))
-        db.commit()
-        db.refresh(dec)
-        
-        return {
-            "status": "success",
-            "decision": {
-                "id": dec.id,
-                "project_id": dec.project_id,
-                "feature_name": dec.feature_name,
-                "decision": dec.decision,
-                "reason": dec.reason,
-                "confidence": dec.confidence,
-                "override_active": dec.override_active,
-                "user_choice": dec.user_choice,
-                "comparison_metrics_json": dec.comparison_metrics_json
-            },
-            "metrics": comparison
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to transform feature: {e}")
+        preview = transformed_preview(df, project.target_variable, choices)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    def numeric(series):
+        return pd.to_numeric(series, errors='coerce') if pd.api.types.is_numeric_dtype(series) else pd.Series(pd.factorize(series)[0], index=series.index)
+    target = numeric(df[project.target_variable])
+    before = numeric(df[feature]).corr(target)
+    after_columns = [c for c in preview.columns if c == feature or c.startswith(feature + '_')]
+    after_values = [abs(numeric(preview[c]).corr(target)) for c in after_columns]
+    before = float(abs(before)) if pd.notna(before) else 0.0
+    after = max((float(c) for c in after_values if pd.notna(c)), default=0.0)
+    missing_before = int(df[feature].isna().sum())
+    missing_after = int(preview[after_columns].isna().sum().sum())
+    comparison = {'before_corr': round(before, 4), 'after_corr': round(after, 4), 'improvement': round(after-before, 4), 'before_missing': missing_before, 'after_missing': missing_after, 'better': bool(after-before > .001 or missing_after < missing_before)}
+    storage.upload_dataset(f'{project_id}_transformed.csv', preview.to_csv(index=False).encode())
+    dec.override_active = payload.transformation != 'recommended'
+    dec.user_choice = choice if dec.override_active else None
+    dec.comparison_metrics_json = comparison
+    project.status = 'Preprocessed'
+    card = db.query(KnowledgeCard).filter_by(project_id=project_id).first()
+    if card:
+        card.status = 'Preprocessed'
+        card.best_model = 'None'
+        card.best_f1 = None
+        card.best_accuracy = None
+        card.best_mse = None
+        card.model_path = None
+        card.models_tested_count = 0
+        card.models_comparison_json = {}
+        card.top_features = []
+        card.shap_global_json = []
+        card.shap_local_json = None
+    db.add(TimelineEvent(project_id=project_id, title='Feature Transformed', description=f"Applied {choice} to {feature}; preprocessing will be fitted on training rows only.", event_type='success'))
+    db.commit()
+    return {'status': 'success', 'metrics': comparison}
 
 
 @router.get("/{project_id}/presigned-download-transformed")
-def get_presigned_download_transformed(project_id: str, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+def get_presigned_download_transformed(project_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.username == current_user.username
+    ).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Project not found or unauthorized")
     try:
         filename = f"{project_id}_transformed.csv"
-        if hasattr(storage, "bucket_name"):
+        if getattr(storage, "client_enabled", True):
             path = f"s3://{storage.bucket_name}/datasets/{filename}"
         else:
-            path = f"file://{os.path.abspath(os.path.join('./tmp/minio_fallback', filename))}"
+            path = f"file://{os.path.abspath(os.path.join(storage.local_fallback_dir, filename))}"
             
         signed_url = storage.generate_presigned_download_url(path)
         return {"url": signed_url}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate presigned download URL: {e}")
 
 
 @router.get("/{project_id}/download-transformed")
-def download_transformed_dataset(project_id: str, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+def download_transformed_dataset(project_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.username == current_user.username
+    ).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Project not found or unauthorized")
     try:
         filename = f"{project_id}_transformed.csv"
-        if hasattr(storage, "bucket_name"):
+        if getattr(storage, "client_enabled", True):
             path = f"s3://{storage.bucket_name}/datasets/{filename}"
         else:
-            path = f"file://{os.path.abspath(os.path.join('./tmp/minio_fallback', filename))}"
+            path = f"file://{os.path.abspath(os.path.join(storage.local_fallback_dir, filename))}"
             
         file_bytes = storage.download_file(path)
         return StreamingResponse(

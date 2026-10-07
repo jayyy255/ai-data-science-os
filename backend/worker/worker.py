@@ -1,16 +1,18 @@
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Add root directory to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database.connection import SessionLocal
-from database.models import TrainingJob, Project, TimelineEvent, KnowledgeCard
+from database.connection import SessionLocal, engine
+from database.schema import initialize_database
+from database.models import TrainingJob, Project, TimelineEvent, KnowledgeCard, WorkerHeartbeat
 from pipeline.kafka_worker import TrainingWorker
 
 def main():
+    initialize_database(engine)
     print("Starting background training database worker...")
     db_session_maker = SessionLocal
     training_pipeline = TrainingWorker(db_session_maker=db_session_maker)
@@ -18,7 +20,7 @@ def main():
     # Clean up any stuck 'running' jobs from prior crashes/restarts
     db_cleanup = db_session_maker()
     try:
-        stuck_jobs = db_cleanup.query(TrainingJob).filter(TrainingJob.status == 'running').all()
+        stuck_jobs = db_cleanup.query(TrainingJob).filter(TrainingJob.status == 'running', TrainingJob.started_at < datetime.utcnow() - timedelta(hours=6)).all()
         for j in stuck_jobs:
             j.status = 'failed'
             j.completed_at = datetime.utcnow()
@@ -36,6 +38,8 @@ def main():
     while True:
         db = db_session_maker()
         try:
+            db.merge(WorkerHeartbeat(id=1, timestamp=datetime.utcnow()))
+            db.commit()
             # Query the next 'queued' job in the database
             job = db.query(TrainingJob).filter(TrainingJob.status == 'queued').order_by(TrainingJob.created_at.asc()).first()
             if job:
@@ -44,9 +48,11 @@ def main():
                 imputation_method = job.imputation_method or "Median"
                 
                 print(f"Found queued job {job_id} for project {project_id}")
-                job.status = 'running'
-                job.started_at = datetime.utcnow()
+                claimed = db.query(TrainingJob).filter(TrainingJob.id == job_id, TrainingJob.status == 'queued').update({'status': 'running', 'started_at': datetime.utcnow()}, synchronize_session=False)
                 db.commit()
+                if not claimed:
+                    db.close()
+                    continue
                 
                 # Fetch project details
                 project = db.query(Project).filter(Project.id == project_id).first()
@@ -87,8 +93,9 @@ def main():
                     job_to_update.artifact_path = results.get("model_path")
                     job_to_update.metrics_json = {
                         "best_model": results["best_model"],
-                        "best_metric": results.get("best_f1") or results.get("best_mse"),
-                        "trials_run": results["trials_run"]
+                        "best_metric": results["best_f1"] if results["best_f1"] is not None else results["best_mse"],
+                        "trials_run": results["trials_run"],
+                        "hpo_trials": results["hpo_trials"]
                     }
                     
                     # Update project status
@@ -104,16 +111,8 @@ def main():
                         card.models_tested_count = results["trials_run"]
                         card.top_features = results["top_features"]
                         card.shap_global_json = results["shap_global"]
-                        card.shap_local_json = {
-                            "customerId": "US-8594-QD",
-                            "probability": 0.762,
-                            "risk": "High Risk",
-                            "drivers": [
-                                {"feature": "support_calls", "value": "5 calls", "impact": "+25.4%"},
-                                {"feature": "MonthlyCharges", "value": "$85.00", "impact": "+15.2%"},
-                                {"feature": "tenure", "value": "3 months", "impact": "+10.6%"}
-                            ]
-                        }
+                        card.shap_local_json = results['shap_local']
+                        card.best_mse = results.get('best_mse')
                         card.model_path = results.get("model_path")
                         card.status = "Ready for Deployment"
                         
@@ -121,7 +120,7 @@ def main():
                     db_save.add(TimelineEvent(
                         project_id=project_id,
                         title="Model Training Completed",
-                        description=f"Best model chosen: {results['best_model']} (Metric: {results.get('best_f1') or results.get('best_mse')})",
+                        description=f"Best model chosen: {results['best_model']} (Metric: {results.get('best_f1') if results.get('best_f1') is not None else results.get('best_mse')})",
                         event_type="success"
                     ))
                     db_save.add(TimelineEvent(
@@ -139,6 +138,7 @@ def main():
                     print(f"Training execution failed for job {job_id}: {train_err}")
                     db_fail = db_session_maker()
                     j = db_fail.query(TrainingJob).filter(TrainingJob.id == job_id).first()
+                    j.metrics_json = {'error': str(train_err)}
                     j.status = 'failed'
                     j.completed_at = datetime.utcnow()
                     

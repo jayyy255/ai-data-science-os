@@ -54,7 +54,7 @@ export default function KnowledgeCardPage() {
               <div className="bg-brand-dark-bg/60 p-3 rounded-xl border border-brand-dark-border/20">
                 <span className="text-[10px] text-zinc-500 font-mono uppercase">Target Outcome Goal</span>
                 <p className="text-zinc-200 mt-1 leading-relaxed">
-                  Reduce customer attrition rate by predicting high-risk subscribers.
+                  {project.description || `Predict ${project.targetVariable} using the uploaded dataset.`}
                 </p>
               </div>
 
@@ -64,8 +64,8 @@ export default function KnowledgeCardPage() {
                   <p className="text-sm font-bold text-violet-300 mt-1">{project.bestModel}</p>
                 </div>
                 <div className="bg-brand-dark-bg/60 p-3 rounded-xl border border-brand-dark-border/20">
-                  <span className="text-[10px] text-zinc-500 font-mono uppercase">Validation F1</span>
-                  <p className="text-sm font-bold text-emerald-400 mt-1 font-mono">{project.bestF1 || 'N/A'}</p>
+                  <span className="text-[10px] text-zinc-500 font-mono uppercase">{project.problemType === 'regression' ? 'Test MSE' : 'Test F1 (weighted)'}</span>
+                  <p className="text-sm font-bold text-emerald-400 mt-1 font-mono">{(project.problemType === 'regression' ? project.bestMse : project.bestF1) ?? 'N/A'}</p>
                 </div>
               </div>
 
@@ -79,7 +79,7 @@ export default function KnowledgeCardPage() {
           </div>
           
           <div className="pt-4 border-t border-brand-dark-border/40 text-xs text-zinc-500 italic">
-            Visual metrics synthesized from active PostgreSQL schema profiles.
+            Metrics and decisions from the current project record.
           </div>
         </div>
 
@@ -111,7 +111,7 @@ export default function KnowledgeCardPage() {
               <div className="space-y-2">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-zinc-500">Missing Values</span>
-                  <span className="font-mono text-zinc-300 font-bold">{project.missingValuesPct}% handled</span>
+                  <span className="font-mono text-zinc-300 font-bold">{project.missingValuesPct}% in uploaded data</span>
                 </div>
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-zinc-500">Oversampling Method</span>
@@ -133,7 +133,7 @@ export default function KnowledgeCardPage() {
           </div>
 
           <div className="pt-4 border-t border-brand-dark-border/40 text-xs text-zinc-500 italic">
-            Metrics registered directly within MinIO objects and local PostgreSQL.
+            Metrics and decisions are saved in the database; model pipelines are saved in artifact storage.
           </div>
         </div>
 
@@ -154,7 +154,7 @@ export default function KnowledgeCardPage() {
               {project.featureEngineeringDecisions?.slice(0, 3).map((dec, i) => (
                 <div key={i} className="border-l-2 border-brand-primary pl-3 text-xs">
                   <div className="flex justify-between font-bold text-violet-300 mb-0.5 font-display">
-                    <span>{dec.feature} &rarr; {dec.decision}</span>
+                    <span>{dec.feature} &rarr; {dec.overrideActive ? dec.userChoice : dec.decision}</span>
                     <span className="text-[10px] font-mono text-emerald-400">
                       {(dec.confidence * 100).toFixed(0)}% AI
                     </span>

@@ -6,8 +6,11 @@ class RedisCacheService:
     def __init__(self):
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         self.in_memory_fallback = {}
+        if not os.getenv('REDIS_URL'):
+            self.redis_enabled = False
+            return
         try:
-            self.client = redis.Redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2)
+            self.client = redis.Redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
             self.client.ping()
             self.redis_enabled = True
             print(f"Redis Cache connected successfully at {redis_url}")

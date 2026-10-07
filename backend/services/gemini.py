@@ -2,15 +2,6 @@ import os
 import json
 from google import genai
 
-# Fallback mock answers for robust local-first execution without active API keys
-MOCK_UNDERSTANDING = {
-    "problem_type": "classification",
-    "target_variable": "churn",
-    "business_goal": "Identify customers likely to terminate subscription services to target with retention promotions.",
-    "recommended_metrics": ["f1_score", "accuracy", "roc_auc"],
-    "suggested_models": ["XGBoost", "LightGBM", "Random Forest"]
-}
-
 class GeminiService:
     def __init__(self):
         # Configure SDK key from env, prioritizing /app/.env file values to bypass Docker Compose overrides
@@ -39,7 +30,7 @@ class GeminiService:
         Uses Gemini to parse business descriptions and suggest problem type, goals and model targets.
         """
         if not self.client_enabled:
-            return MOCK_UNDERSTANDING
+            return {'problem_type': 'classification', 'target_variable': target, 'business_goal': description or name, 'recommended_metrics': ['f1_score', 'accuracy'], 'suggested_models': ['Random Forest', 'XGBoost', 'LightGBM', 'Neural Network']}
 
         try:
             prompt = f"""
@@ -65,22 +56,54 @@ class GeminiService:
             return json.loads(response.text.strip())
         except Exception as e:
             print(f"Gemini API Error in understand_project: {e}")
-            return MOCK_UNDERSTANDING
+            return {'problem_type': 'classification', 'target_variable': target, 'business_goal': description or name, 'recommended_metrics': ['f1_score', 'accuracy'], 'suggested_models': ['Random Forest', 'XGBoost', 'LightGBM', 'Neural Network']}
+
+    def analyze_eda_profile(self, name: str, eda_profile: dict) -> str:
+        """
+        Uses Gemini (gemini-2.5-flash) to write a dynamic data scientist summary audit of the EDA profile.
+        """
+        if not self.client_enabled:
+            return f"Dataset Profile Summary for '{name}': Computed {eda_profile.get('rows_count')} rows across {eda_profile.get('columns_count')} features. Numerical features: {eda_profile.get('numerical_count')}, Categorical: {eda_profile.get('categorical_count')}. Missing value rate is {round(eda_profile.get('missing_pct', 0), 2)}%."
+
+        try:
+            prompt = f"""
+            You are an expert Data Scientist.
+            Analyze the following statistical profile of the dataset:
+            Project/Dataset Name: {name}
+            Total Rows: {eda_profile.get('rows_count')}
+            Total Columns: {eda_profile.get('columns_count')}
+            Missing Cells Pct: {eda_profile.get('missing_pct')}%
+            Numerical Columns Count: {eda_profile.get('numerical_count')}
+            Categorical Columns Count: {eda_profile.get('categorical_count')}
+            Imbalance Warning: {eda_profile.get('is_imbalanced')}
+            
+            Write a concise, professional 3-4 sentence dataset assessment report. Highlight any data quality concerns, distribution balances, missing value density, and what steps should be taken (e.g. scaling, encoding, imputation). Make it descriptive and grounded.
+            """
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            return response.text.strip()
+        except Exception as e:
+            print(f"Gemini API Error in analyze_eda_profile: {e}")
+            return f"Dataset Profile Summary for '{name}': Computed {eda_profile.get('rows_count')} rows across {eda_profile.get('columns_count')} features. Missing rate is {round(eda_profile.get('missing_pct', 0), 2)}%."
 
     def assistant_chat(self, question: str, knowledge_card: dict, timeline: list) -> str:
         """
         Converse with user using LangGraph grounding concept based on active project state.
         """
         if not self.client_enabled:
-            # simple mock chatbot rules if API key not present
-            q = question.lower()
-            if "xgboost" in q:
-                return "XGBoost was chosen as champion model based on HPO validations. It achieves 0.91 F1 compared to 0.86 for Random Forest."
-            return f"Understood query. Current active model is {knowledge_card.get('best_model', 'None')} with validation score of {knowledge_card.get('best_f1', 'N/A')}."
+            model = knowledge_card.get('best_model') or 'None'
+            return ("Gemini is not configured. Here is the current project context: "
+                    f"{knowledge_card.get('rows_count', 0)} rows, {knowledge_card.get('columns_count', 0)} columns; "
+                    f"status: {knowledge_card.get('status')}; champion: {model}; "
+                    f"F1: {knowledge_card.get('best_f1')}; MSE: {knowledge_card.get('best_mse')}. "
+                    f"Preprocessing: {json.dumps(knowledge_card.get('decisions', []))}. "
+                    "Configure GEMINI_API_KEY on the server for conversational explanations.")
 
         try:
             context = f"""
-            You are a project-aware AI Data Science Companion.
+            You are a project-aware Data Science Companion.
             Here is the active project's Knowledge Card context:
             {json.dumps(knowledge_card, indent=2)}
             
@@ -101,4 +124,4 @@ class GeminiService:
             print(f"DIAGNOSTIC ERROR - Gemini API Key Issue: {err_msg}")
             
             # Return generic friendly fallback to the client
-            return "Sorry for the inconvenience, the AI is unavailable right now. It shall be back shortly."
+            return "Sorry for the inconvenience, the chat is unavailable right now. It shall be back shortly."

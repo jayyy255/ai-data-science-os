@@ -1,3 +1,4 @@
+import { downloadFile } from '../api';
 import React, { useState } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
 import { Sliders, HelpCircle, Save, Sparkles, AlertTriangle, ShieldCheck, Check, ArrowRight, Download, TrendingUp, Database, Loader2 } from 'lucide-react';
@@ -35,45 +36,18 @@ export default function FeatureEngineeringPage() {
 
   const handleDownloadTransformed = async () => {
     setDownloadingTransformed(true);
-    const API_BASE = '/api';
-    try {
-      const res = await fetch(`${API_BASE}/projects/${project.id}/presigned-download-transformed`);
-      if (!res.ok) throw new Error("Failed to get presigned URL");
-      const data = await res.json();
-      
-      const fileRes = await fetch(data.url);
-      const blob = await fileRes.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = blobUrl;
-      a.download = `${project.id}_transformed_dataset.csv`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(blobUrl);
-      a.remove();
-    } catch (err) {
-      console.warn("Signed URL download failed/CORS block. Falling back to backend stream:", err);
-      // Fallback: download directly from backend streaming proxy using hidden iframe to prevent page navigation
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      iframe.src = `${API_BASE}/projects/${project.id}/download-transformed`;
-      document.body.appendChild(iframe);
-      setTimeout(() => iframe.remove(), 5000);
-    } finally {
-      setDownloadingTransformed(false);
-    }
+    try { await downloadFile(`/projects/${project.id}/download-transformed`, `${project.id}_transformed_dataset.csv`); }
+    catch (err) { alert(err.message); }
+    finally { setDownloadingTransformed(false); }
   };
-
-  const handleSave = () => {
-    setSaving(true);
-    setSuccess(false);
-    setTimeout(() => {
-      setSaving(false);
+  const handleSave = async () => {
+    setSaving(true); setSuccess(false);
+    try {
+      for (const [feature, choice] of Object.entries(overrides)) await applyFeatureTransformation(project.id, feature, choice);
+      await triggerTraining(project.id);
       setSuccess(true);
-      triggerTraining(project.id);
-      setTimeout(() => setSuccess(false), 3000);
-    }, 1200);
+    } catch (err) { alert(err.response?.data?.detail || err.message); }
+    finally { setSaving(false); }
   };
 
   // Check if any feature has a transformed state
@@ -114,7 +88,7 @@ export default function FeatureEngineeringPage() {
             disabled={saving}
             className="flex items-center gap-1.5 bg-brand-primary hover:bg-brand-primary-hover px-4 py-2 rounded-xl text-sm font-bold text-white transition-all cursor-pointer shadow-lg shadow-brand-primary/20"
           >
-            {saving ? 'Saving...' : success ? 'Saved!' : 'Save Decisions'}
+            {saving ? 'Saving...' : success ? 'Saved!' : 'Save & Train'}
             {success ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
           </button>
         </div>
@@ -127,7 +101,7 @@ export default function FeatureEngineeringPage() {
           <span>Average AI recommendation confidence is <strong className="text-emerald-400 font-mono">91%</strong> based on dataset features metadata.</span>
         </div>
         <div className="text-xs font-mono text-zinc-500 self-end md:self-center">
-          Decisions are logged inside PostgreSQL & MLflow.
+          Decisions and training results are saved in the project database.
         </div>
       </div>
 

@@ -20,6 +20,8 @@ env/
 
 # Local databases & fallbacks
 *.db
+*.pkl
+.vault_agent_index.pkl
 tmp/
 .tmp/
 minio_fallback/
@@ -44,3 +46,5 @@ SYSTEM*.docx
 tmp/
 
 E:\code\projects\ai-data-science-os\tmp
+.runtime/
+*.log

@@ -4,12 +4,27 @@ import numpy as np
 
 class DatasetService:
     @staticmethod
-    def profile_dataset(file_bytes: bytes, target_variable: str) -> dict:
+    def infer_problem_type(target, requested='auto'):
+        if requested not in {'auto', 'classification', 'regression'}:
+            raise ValueError('Problem type must be auto, classification, or regression')
+        if requested != 'auto':
+            if requested == 'regression' and not pd.api.types.is_numeric_dtype(target):
+                raise ValueError('Regression requires a numeric target column')
+            return requested
+        from sklearn.utils.multiclass import type_of_target
+        return 'regression' if type_of_target(target.dropna()) == 'continuous' or (pd.api.types.is_numeric_dtype(target) and target.nunique() > 20) else 'classification'
+
+    @staticmethod
+    def profile_dataset(file_bytes: bytes, target_variable: str, problem_type='auto') -> dict:
         """
         Dynamically analyzes CSV dataset structure and quality metrics.
         """
         try:
-            df = pd.read_csv(io.BytesIO(file_bytes))
+            df = pd.read_csv(io.BytesIO(file_bytes)).replace([np.inf, -np.inf], np.nan)
+            if df.empty: raise ValueError('Dataset must contain at least one data row')
+            if target_variable not in df.columns: raise ValueError(f"Target column '{target_variable}' is not present in the CSV")
+            if df[target_variable].dropna().nunique() < 2: raise ValueError('Target must contain at least two distinct non-missing values')
+            task = DatasetService.infer_problem_type(df[target_variable], problem_type)
             rows_count = len(df)
             columns_count = len(df.columns)
             
@@ -32,7 +47,7 @@ class DatasetService:
                     
             is_imbalanced = "None"
             class_distribution = []
-            if target_variable in df.columns:
+            if task == 'classification':
                 target_counts = df[target_variable].value_counts(normalize=True)
                 if len(target_counts) > 0 and target_counts.iloc[0] > 0.7:
                     is_imbalanced = f"Imbalance detected ({round(target_counts.iloc[0]*100)}% major class)"
@@ -40,7 +55,7 @@ class DatasetService:
                 # Compute raw counts for distribution chart
                 val_counts = df[target_variable].value_counts()
                 colors = ["#7c3aed", "#3f3f46", "#818cf8", "#a78bfa"]
-                for i, (val, count) in enumerate(val_counts.items()):
+                for i, (val, count) in enumerate(val_counts.head(30).items()):
                     class_distribution.append({
                         "name": str(val),
                         "count": int(count),
@@ -57,7 +72,7 @@ class DatasetService:
             
             # Compute correlation matrix for top numerical columns
             correlations = {}
-            corr_cols = num_cols[:5]
+            corr_cols = num_cols[:8]
             if len(corr_cols) > 1:
                 corr_df = df[corr_cols].corr().fillna(0)
                 correlations = {
@@ -65,11 +80,13 @@ class DatasetService:
                     "values": corr_df.values.tolist()
                 }
                 
-            # Compute distributions (histograms) for numerical columns
+            # Compute distributions for all columns
             distributions = {}
-            for col in num_cols[:2]:
+            for col in df.columns:
                 col_data = df[col].dropna()
-                if len(col_data) > 0:
+                if len(col_data) == 0:
+                    continue
+                if col in num_cols:
                     counts, bin_edges = np.histogram(col_data, bins=8)
                     distributions[col] = [
                         {
@@ -77,6 +94,15 @@ class DatasetService:
                             "count": int(counts[i])
                         }
                         for i in range(len(counts))
+                    ]
+                else:
+                    top_vals = col_data.value_counts().head(8)
+                    distributions[col] = [
+                        {
+                            "bin": str(val),
+                            "count": int(count)
+                        }
+                        for val, count in top_vals.items()
                     ]
                     
             # Compute features metadata
@@ -94,10 +120,11 @@ class DatasetService:
                     "missing": round(col_missing_pct, 2),
                     "unique": unique_val,
                     "sample": sample_val,
-                    "quality": "Imputed (Median)" if col_missing_pct > 0 else "Good"
+                    "quality": "Target" if col == target_variable else "Missing values require imputation" if col_missing_pct > 0 else "Good"
                 })
             
             return {
+                "problem_type": task,
                 "rows_count": rows_count,
                 "columns_count": columns_count,
                 "missing_pct": missing_pct,
@@ -111,29 +138,4 @@ class DatasetService:
                 "features": features_metadata
             }
         except Exception as e:
-            print(f"Dataset Intelligence parsing failure: {e}")
-            return {
-                "rows_count": 1000,
-                "columns_count": 10,
-                "missing_pct": 1.5,
-                "numerical_count": 6,
-                "categorical_count": 4,
-                "is_imbalanced": "None",
-                "quality_health": {
-                    "missingValues": "1.5% missing",
-                    "duplicates": "0 duplicates",
-                    "outliers": "No outliers detected",
-                    "classImbalance": "None",
-                    "invalidDataTypes": "0 invalid data types"
-                },
-                "class_distribution": [
-                    {"name": "Class 0", "count": 700, "color": "#3f3f46"},
-                    {"name": "Class 1", "count": 300, "color": "#7c3aed"}
-                ],
-                "correlations": {
-                    "columns": ["col1", "col2"],
-                    "values": [[1.0, 0.2], [0.2, 1.0]]
-                },
-                "distributions": {},
-                "features": []
-            }
+            raise ValueError(f'Dataset analysis failed: {e}') from e
