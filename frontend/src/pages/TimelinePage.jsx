@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
-import { Clock, Search, ChevronDown, ChevronUp, FileCode } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileCode } from 'lucide-react';
 
 export default function TimelinePage() {
   const { getActiveProject } = useProjectStore();
@@ -23,12 +23,12 @@ export default function TimelinePage() {
       {/* Timeline Layout */}
       <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-6 shadow-xl max-w-3xl">
         <div className="space-y-6 relative before:absolute before:inset-y-2 before:left-4 before:w-0.5 before:bg-brand-dark-border pl-1">
-          
+
           {project.timeline?.map((evt, idx) => {
             const isExpanded = expandedId === idx;
             return (
               <div key={idx} className="flex gap-5 relative">
-                
+
                 {/* Node icon indicator */}
                 <div className="w-8 h-8 rounded-full bg-brand-dark-card border border-brand-dark-border flex items-center justify-center text-xs font-bold z-10 select-none">
                   <span className={`w-2.5 h-2.5 rounded-full ${
@@ -50,6 +50,7 @@ export default function TimelinePage() {
                     </div>
 
                     <button
+                      aria-label={`Toggle details for ${evt.title}`}
                       onClick={() => toggleExpand(idx)}
                       className="p-1 hover:bg-brand-dark-card rounded-lg text-zinc-400 cursor-pointer"
                     >
@@ -72,12 +73,11 @@ export default function TimelinePage() {
 {JSON.stringify({
   event: evt.title,
   timestamp: evt.time,
-  status: evt.type === 'success' ? 'SUCCESS' : 'PENDING',
+  event_type: evt.type,
   project_id: project.id,
   target: project.targetVariable,
   details: {
-    logged_summary: evt.desc,
-    optuna_optimizing: project.status === 'Training'
+    logged_summary: evt.desc
   }
 }, null, 2)}
                       </pre>

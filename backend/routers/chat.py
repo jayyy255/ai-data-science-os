@@ -23,7 +23,7 @@ def chat(project_id: str, payload: ChatQuery, current_user: User = Depends(get_c
         raise HTTPException(status_code=404, detail="Project not found or unauthorized")
 
     if not payload.question.strip(): raise HTTPException(status_code=400, detail='Question is required')
-    cache_question = str(project.updated_at) + ':' + payload.question
+    cache_question = 'v2:' + str(project.updated_at) + ':' + payload.question
     # Cache responses against the project revision.
     cached_response = cache.get_cached_chat(project_id, cache_question)
     if cached_response:
@@ -32,7 +32,7 @@ def chat(project_id: str, payload: ChatQuery, current_user: User = Depends(get_c
 
     card = db.query(KnowledgeCard).filter(KnowledgeCard.project_id == project_id).first()
     timeline = db.query(TimelineEvent).filter(TimelineEvent.project_id == project_id).order_by(TimelineEvent.timestamp.desc()).limit(5).all()
-    
+
     card_dict = {
         "best_model": card.best_model if card else "None",
         "best_f1": card.best_f1 if card else None,
@@ -45,13 +45,12 @@ def chat(project_id: str, payload: ChatQuery, current_user: User = Depends(get_c
         "columns_count": card.columns_count if card else 0,
         "status": project.status
     }
-    
+
     timeline_list = [f"{evt.title}: {evt.description}" for evt in timeline]
-    
+
     response = gemini.assistant_chat(payload.question, card_dict, timeline_list)
-    
+
     # 2. Store response in Redis Assistant Cache
     cache.set_cached_chat(project_id, cache_question, response)
-    
-    return {"answer": response}
 
+    return {"answer": response}

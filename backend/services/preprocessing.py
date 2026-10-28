@@ -6,6 +6,16 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler, KBinsDiscretizer
 
+class KNNImputerPreservingNames(KNNImputer):
+    """Keep feature names aligned with output when all-empty columns are retained."""
+    def get_feature_names_out(self, input_features=None):
+        if self.keep_empty_features and not self.add_indicator:
+            names = input_features if input_features is not None else getattr(self, 'feature_names_in_', [f'x{i}' for i in range(self.n_features_in_)])
+            if len(names) != self.n_features_in_:
+                raise ValueError('Input feature names do not match fitted columns')
+            return np.asarray(names, dtype=object)
+        return super().get_feature_names_out(input_features)
+
 CHOICES = {'Impute Median', 'Impute Mean', 'One-Hot Encoding', 'Standard Scaling', 'Keep Raw', 'Discretize Binning'}
 
 def build_preprocessor(frame, decisions=None, method='Median'):
@@ -20,7 +30,7 @@ def build_preprocessor(frame, decisions=None, method='Median'):
             if choice not in CHOICES: raise ValueError(f'Unsupported transformation: {choice}')
             transform = StandardScaler() if choice == 'Standard Scaling' else KBinsDiscretizer(n_bins=4, encode='ordinal', strategy='quantile') if choice == 'Discretize Binning' else OneHotEncoder(handle_unknown='ignore', sparse_output=False, max_categories=32) if choice == 'One-Hot Encoding' else 'passthrough'
             after_imputation.append((f'column{index}', transform, [index]))
-        transforms.append(('numeric_knn', Pipeline([('impute', KNNImputer(n_neighbors=5, keep_empty_features=True)), ('transform', ColumnTransformer(after_imputation, verbose_feature_names_out=False))]), knn_columns))
+        transforms.append(('numeric_knn', Pipeline([('impute', KNNImputerPreservingNames(n_neighbors=5, keep_empty_features=True)), ('transform', ColumnTransformer(after_imputation, verbose_feature_names_out=False))]), knn_columns))
     for index, column in enumerate(frame.columns):
         if column in knn_columns: continue
         numeric = pd.api.types.is_numeric_dtype(frame[column])
@@ -30,7 +40,7 @@ def build_preprocessor(frame, decisions=None, method='Median'):
         steps = []
         if numeric:
             if method == 'KNN' and choice not in {'Impute Mean', 'Impute Median'}:
-                imputer = KNNImputer(n_neighbors=5, keep_empty_features=True)
+                imputer = KNNImputerPreservingNames(n_neighbors=5, keep_empty_features=True)
             else:
                 strategy = 'mean' if choice == 'Impute Mean' else 'median' if choice == 'Impute Median' else 'mean' if method == 'Mean' else 'most_frequent' if method == 'Mode' else 'median'
                 imputer = SimpleImputer(strategy=strategy, keep_empty_features=True)

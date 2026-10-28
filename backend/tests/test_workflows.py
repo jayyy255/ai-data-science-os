@@ -13,6 +13,7 @@ test_directory = tempfile.TemporaryDirectory(dir=Path('tmp').resolve())
 os.environ['DATABASE_URL'] = 'sqlite:///' + (Path(test_directory.name) / 'test.db').as_posix()
 os.environ['LOCAL_STORAGE_DIR'] = str(Path(test_directory.name) / 'artifacts')
 os.environ['ENVIRONMENT'] = 'local'
+os.environ['AIDSO_LOAD_ENV_FILE'] = '0'
 os.environ.pop('MINIO_ENDPOINT', None)
 os.environ.pop('REDIS_URL', None)
 os.environ.pop('GEMINI_API_KEY', None)
@@ -48,6 +49,41 @@ class WorkflowTests(unittest.TestCase):
         result = self.client.post('/api/projects', data={'name': name, 'target_variable': 'target', 'description': 'Predict test outcome'}, files={'file': ('data.csv', frame.to_csv(index=False).encode(), 'text/csv')})
         self.assertEqual(result.status_code, 200, result.text)
         return result.json()['project']['id']
+
+    def test_gemini_local_file_and_production_environment_precedence(self):
+        from services.gemini import GeminiService
+        from unittest.mock import patch
+        with patch('services.gemini.Path.is_file', return_value=True), patch('services.gemini.dotenv_values', return_value={'GEMINI_API_KEY': 'local-test-key'}) as read_file, patch('services.gemini.genai.Client') as client:
+            with patch.dict(os.environ, {'ENVIRONMENT': 'local', 'AIDSO_LOAD_ENV_FILE': '1', 'GEMINI_API_KEY': 'inherited-test-key'}):
+                GeminiService()
+                self.assertEqual(client.call_args.kwargs['api_key'], 'local-test-key')
+            client.reset_mock(); read_file.reset_mock()
+            with patch.dict(os.environ, {'ENVIRONMENT': 'production', 'GEMINI_API_KEY': 'production-test-key'}):
+                GeminiService()
+                self.assertEqual(client.call_args.kwargs['api_key'], 'production-test-key')
+                read_file.assert_not_called()
+            client.reset_mock(); read_file.reset_mock()
+            with patch.dict(os.environ, {'ENVIRONMENT': 'local', 'AIDSO_LOAD_ENV_FILE': '0', 'GEMINI_API_KEY': 'isolated-test-key'}):
+                GeminiService()
+                self.assertEqual(client.call_args.kwargs['api_key'], 'isolated-test-key')
+                read_file.assert_not_called()
+
+    def test_assistant_falls_back_when_provider_fails(self):
+        from services.gemini import GeminiService
+        from unittest.mock import Mock
+        service = GeminiService()
+        service.client_enabled = True
+        service.client = Mock()
+        service.client.models.generate_content.side_effect = RuntimeError('Provider unavailable')
+        answer = service.assistant_chat('Explain the champion', {
+            'target': 'sales', 'problem_type': 'regression', 'best_model': 'Random Forest',
+            'best_mse': 12.5, 'rows_count': 150, 'columns_count': 5,
+            'status': 'Ready', 'decisions': [], 'top_features': ['spend']}, [])
+        self.assertIn('local summary', answer)
+        self.assertIn('test MSE: 12.5', answer)
+        self.assertIn('Random Forest', answer)
+        self.assertIn('sales', answer)
+        self.assertNotIn('F1:', answer)
 
     def test_authentication_isolation_and_revocation(self):
         project_id = self.create()
@@ -120,13 +156,15 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(len(self.client.get(f'/api/projects/{project_id}/jobs').json()['jobs']), 1)
             result = TrainingWorker(SessionLocal).process_training_job(project_id, 'target', kind, 'KNN')
             self.assertGreaterEqual(len(result['models_comparison']), 2)
-            self.assertEqual(len(result['hpo_trials']), 3)
+            self.assertEqual(len(result['hpo_trials']), len(result['models_comparison']) * 5)
+            self.assertEqual({trial['model'] for trial in result['hpo_trials']}, set(result['models_comparison']))
             from services.storage.factory import get_storage_provider
             for model in result['models_comparison'].values():
                 self.assertEqual(model['status'], 'Trained', model)
                 fitted = pickle.loads(get_storage_provider().download_file(model['artifact_path']))
                 sample = frame.drop(columns='target').head(3)
                 self.assertEqual(len(fitted.predict(sample)), 3)
+                self.assertIn('numeric_knn', fitted.named_steps['preprocess'].named_transformers_)
                 unseen = sample.copy(); unseen['segment'] = 'unseen-category'
                 self.assertEqual(len(fitted.predict(unseen)), 3)
             with SessionLocal() as db:
@@ -141,11 +179,51 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(len(response.json()['predictions']), 3)
             self.assertEqual(self.client.get(f'/api/projects/{project_id}/explain/0').status_code, 200)
             self.assertEqual(self.client.get(f'/api/projects/{project_id}/explain/99999').status_code, 400)
+            self.client.post(f'/api/projects/{project_id}/champion', json={'model_name': 'Neural Network'})
+            neural_explanation = self.client.get(f'/api/projects/{project_id}/explain/0')
+            self.assertTrue(neural_explanation.json()['drivers'], neural_explanation.text)
             name = next(iter(result['models_comparison']))
             response = self.client.post(f'/api/projects/{project_id}/champion', json={'model_name': name})
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(self.client.get(f'/api/projects/{project_id}/download-model', params={'model_name': name}).status_code, 200)
             self.assertEqual(self.other.post(f'/api/projects/{project_id}/predict', json={'rows': rows}).status_code, 404)
+
+    def test_profile_detects_dates_and_text_and_real_quality_issues(self):
+        from services.dataset import DatasetService
+        frame = pd.DataFrame({'amount': [1., 2., 3., 1000.] + [4.] * 30,
+            'day': ['2026-10-12'] * 34,
+            'notes': ['A detailed free text observation containing several different words for the profile detector.'] * 34,
+            'category': ['a', 'b'] * 17, 'target': ['yes'] * 30 + ['no'] * 4})
+        profile = DatasetService.profile_dataset(frame.to_csv(index=False).encode(), 'target')
+        self.assertEqual(profile['datetime_count'], 1)
+        self.assertEqual(profile['text_count'], 1)
+        self.assertEqual(profile['categorical_count'], 2)
+        self.assertIn('outliers found', profile['quality_health']['outliers'])
+        self.assertNotEqual(profile['quality_health']['duplicates'], '0 duplicates')
+        self.assertIn('Imbalance detected', profile['quality_health']['classImbalance'])
+        self.assertEqual(profile['features'][1]['semantic_type'], 'datetime')
+
+    def test_model_download_preserves_custom_bucket_artifact_path(self):
+        from unittest.mock import Mock, patch
+        project_id = self.create()
+        path = f's3://custom-production-bucket/models/{project_id}/random_forest.pkl'
+        with SessionLocal() as db:
+            card = db.query(KnowledgeCard).filter_by(project_id=project_id).first()
+            card.model_path = path
+            card.models_comparison_json = {'Random Forest': {'status': 'Trained', 'artifact_path': path}}
+            db.commit()
+        storage = Mock()
+        storage.download_file.return_value = b'pipeline-bytes'
+        storage.generate_presigned_download_url.return_value = 'https://example.test/signed-model'
+        with patch('routers.projects.storage', storage):
+            response = self.client.get(f'/api/projects/{project_id}/download-model', params={'model_name': 'Random Forest'})
+            self.assertEqual(response.content, b'pipeline-bytes')
+            storage.download_file.assert_called_once_with(path)
+            response = self.client.get(f'/api/projects/{project_id}/presigned-download-model', params={'model_name': 'Random Forest'})
+            self.assertEqual(response.status_code, 200)
+            storage.generate_presigned_download_url.assert_called_once_with(path)
+            response = self.client.get(f'/api/projects/{project_id}/download-model', params={'model_name': '../missing'})
+            self.assertEqual(response.status_code, 404)
 
     def test_schema_upgrade_is_repeatable(self):
         initialize_database(engine)

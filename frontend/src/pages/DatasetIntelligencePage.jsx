@@ -1,6 +1,6 @@
 import React from 'react';
 import { useProjectStore } from '../store/useProjectStore';
-import { LayoutGrid, AlertTriangle, CheckCircle, BarChart3, Database, ShieldAlert, Sparkles } from 'lucide-react';
+import { AlertTriangle, CheckCircle, BarChart3, ShieldAlert } from 'lucide-react';
 
 export default function DatasetIntelligencePage() {
   const { getActiveProject } = useProjectStore();
@@ -8,13 +8,15 @@ export default function DatasetIntelligencePage() {
 
   const struct = project.structure || { numerical: 0, categorical: 0, datetime: 0, text: 0 };
   const health = project.qualityHealth || {};
+  const examples = kind => (project.features || []).filter(feature => (feature.semantic_type || (feature.type.includes('int') || feature.type.includes('float') ? 'numerical' : 'categorical')) === kind).slice(0, 2).map(feature => feature.name).join(', ') || 'No columns detected';
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-display font-bold text-white tracking-tight">Dataset Intelligence</h1>
-        <p className="text-sm text-zinc-400">Structural schema analysis and quality profiling logged in PostgreSQL.</p>
+        <p className="font-dataset-name dataset-card-title text-violet-300 mt-2">{project.name}</p>
+        <p className="text-sm text-zinc-400">Column types and quality checks computed from the uploaded dataset.</p>
       </div>
 
       {/* Structure Grid */}
@@ -24,22 +26,22 @@ export default function DatasetIntelligencePage() {
           <div className="bg-brand-dark-surface p-4 rounded-xl border border-brand-dark-border text-center">
             <span className="text-[10px] text-zinc-500 font-mono uppercase">Numerical Columns</span>
             <h4 className="text-2xl font-bold font-mono text-violet-300 mt-1">{struct.numerical}</h4>
-            <span className="text-[10px] text-zinc-500 block mt-1">e.g. tenure, MonthlyCharges</span>
+            <span className="text-[10px] text-zinc-500 block mt-1">{examples('numerical')}</span>
           </div>
           <div className="bg-brand-dark-surface p-4 rounded-xl border border-brand-dark-border text-center">
             <span className="text-[10px] text-zinc-500 font-mono uppercase">Categorical Columns</span>
             <h4 className="text-2xl font-bold font-mono text-indigo-300 mt-1">{struct.categorical}</h4>
-            <span className="text-[10px] text-zinc-500 block mt-1">e.g. contract, payment_method</span>
+            <span className="text-[10px] text-zinc-500 block mt-1">{examples('categorical')}</span>
           </div>
           <div className="bg-brand-dark-surface p-4 rounded-xl border border-brand-dark-border text-center">
             <span className="text-[10px] text-zinc-500 font-mono uppercase">Datetime Columns</span>
             <h4 className="text-2xl font-bold font-mono text-zinc-400 mt-1">{struct.datetime}</h4>
-            <span className="text-[10px] text-zinc-500 block mt-1">e.g. signup_date</span>
+            <span className="text-[10px] text-zinc-500 block mt-1">{examples('datetime')}</span>
           </div>
           <div className="bg-brand-dark-surface p-4 rounded-xl border border-brand-dark-border text-center">
             <span className="text-[10px] text-zinc-500 font-mono uppercase">Text Columns</span>
             <h4 className="text-2xl font-bold font-mono text-zinc-400 mt-1">{struct.text}</h4>
-            <span className="text-[10px] text-zinc-500 block mt-1">e.g. customer_feedback</span>
+            <span className="text-[10px] text-zinc-500 block mt-1">{examples('text')}</span>
           </div>
         </div>
       </div>
@@ -47,9 +49,9 @@ export default function DatasetIntelligencePage() {
       {/* Quality Profile Cards */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider font-mono">Dataset Quality Health</h3>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          
+
           <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-4 flex gap-3.5 items-start">
             <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 p-2 rounded-lg">
               <ShieldAlert className="w-5 h-5" />
@@ -68,7 +70,7 @@ export default function DatasetIntelligencePage() {
             <div>
               <span className="text-xs font-mono uppercase text-zinc-500">Duplicate Check</span>
               <p className="text-sm font-semibold text-zinc-200 mt-0.5">{health.duplicates}</p>
-              <p className="text-xs text-zinc-500 mt-1">No index cleaning required</p>
+              <p className="text-xs text-zinc-500 mt-1">Count of repeated complete rows; review before training.</p>
             </div>
           </div>
 
@@ -90,7 +92,7 @@ export default function DatasetIntelligencePage() {
             <div>
               <span className="text-xs font-mono uppercase text-zinc-500">Class Balance</span>
               <p className="text-sm font-semibold text-zinc-200 mt-0.5">{health.classImbalance}</p>
-              <p className="text-xs text-zinc-500 mt-1">Class balance is reported from the uploaded target values.</p>
+              <p className="text-xs text-zinc-500 mt-1">{project.problemType === 'regression' ? 'Not applicable to a numeric regression target.' : 'Class balance is reported from the uploaded target values.'}</p>
             </div>
           </div>
         </div>
@@ -100,7 +102,7 @@ export default function DatasetIntelligencePage() {
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider font-mono">Feature Schema Registry</h3>
         <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl overflow-hidden shadow-xl">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" role="region" aria-label="Scrollable data table" tabIndex={0}>
             <table className="w-full text-left text-sm">
               <thead className="bg-brand-dark-bg/60 border-b border-brand-dark-border text-zinc-400 font-mono text-xs">
                 <tr>

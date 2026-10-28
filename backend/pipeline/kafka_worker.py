@@ -9,8 +9,6 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, accuracy_score, mean_squared_error
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.neural_network import MLPClassifier, MLPRegressor
 from services.preprocessing import build_preprocessor, clean_frame
 
 class EncodedClassifier(ClassifierMixin, BaseEstimator):
@@ -42,7 +40,7 @@ class TrainingWorker:
             project = db.query(Project).filter_by(id=project_id).first()
             if not project or not project.dataset_path: raise ValueError('Uploaded dataset is missing')
             data = storage.download_file(project.dataset_path)
-            choices = {d.feature_name: d.user_choice if d.override_active else d.decision for d in db.query(DecisionMemory).filter_by(project_id=project_id).all()}
+            choices = {d.feature_name: d.user_choice if d.override_active else 'Keep Raw' if d.decision.startswith('Impute ') else d.decision for d in db.query(DecisionMemory).filter_by(project_id=project_id).all()}
         frame = clean_frame(pd.read_csv(io.BytesIO(data)))
         if target not in frame: raise ValueError(f'Target column {target} is missing')
         frame = frame.dropna(subset=[target])
@@ -65,41 +63,38 @@ class TrainingWorker:
         def pipeline(estimator):
             if classification: estimator = EncodedClassifier(estimator)
             return Pipeline([('preprocess', build_preprocessor(X_train, choices, imputation_method)), ('model', estimator)])
-        forest = RandomForestClassifier if classification else RandomForestRegressor
-        def objective(trial):
-            estimator = forest(n_estimators=trial.suggest_int('n_estimators', 30, 80), max_depth=trial.suggest_int('max_depth', 3, 10), random_state=42, n_jobs=2)
-            fitted = pipeline(estimator).fit(X_fit, y_fit)
-            return metric(y_val, fitted.predict(X_val))
-        study = optuna.create_study(direction='maximize' if classification else 'minimize', sampler=optuna.samplers.TPESampler(seed=42))
-        study.optimize(objective, n_trials=3)
-        candidates = {'Random Forest': forest(**study.best_params, random_state=42, n_jobs=2)}
-        try:
-            import xgboost as xgb
-            candidates['XGBoost'] = (xgb.XGBClassifier if classification else xgb.XGBRegressor)(n_estimators=60, max_depth=4, random_state=42, n_jobs=2)
-        except ImportError: pass
-        try:
-            import lightgbm as lgb
-            candidates['LightGBM'] = (lgb.LGBMClassifier if classification else lgb.LGBMRegressor)(n_estimators=60, max_depth=4, random_state=42, n_jobs=2, verbosity=-1)
-        except ImportError: pass
-        candidates['Neural Network'] = (MLPClassifier if classification else MLPRegressor)(hidden_layer_sizes=(32,16), max_iter=120, random_state=42)
-        comparison = {name: {'status': 'Idle', 'metric': None} for name in candidates}
+        from services.model_search import model_factories, TRIALS_PER_MODEL
+        factories = model_factories(classification)
+        comparison = {name: {'status': 'Idle', 'metric': None} for name in factories}
         self.update_models_comparison_db(project_id, comparison)
         trained = {}
-        for name, estimator in candidates.items():
-            comparison[name] = {'status': 'Training', 'metric': None}
+        trials = []
+        for name, factory in factories.items():
+            comparison[name] = {'status': 'Training', 'phase': 'Optimizing', 'metric': None}
             self.update_models_comparison_db(project_id, comparison)
             try:
-                fitted = pipeline(estimator).fit(X_train, y_train)
+                def objective(trial):
+                    fitted = pipeline(factory(trial)).fit(X_fit, y_fit)
+                    return metric(y_val, fitted.predict(X_val))
+                study = optuna.create_study(direction='maximize' if classification else 'minimize', sampler=optuna.samplers.TPESampler(seed=42))
+                study.optimize(objective, n_trials=TRIALS_PER_MODEL)
+                for trial in study.trials:
+                    trials.append({'trial': len(trials)+1, 'model': name, 'params': trial.params,
+                        'f1': trial.value, 'metric_name': 'Weighted F1' if classification else 'MSE',
+                        'status': 'Completed (Best)' if trial.number == study.best_trial.number else 'Completed'})
+                fitted = pipeline(factory(study.best_trial)).fit(X_train, y_train)
                 predictions = fitted.predict(X_test)
                 score = metric(y_test, predictions)
                 model_path = storage.upload_model(project_id, name.lower().replace(' ', '_'), pickle.dumps(fitted))
-                comparison[name] = {'status': 'Trained', 'metric': score, 'artifact_path': model_path, 'accuracy': float(accuracy_score(y_test, predictions)) if classification else None}
+                comparison[name] = {'status': 'Trained', 'metric': score, 'validation_metric': study.best_value,
+                    'best_params': study.best_params, 'hpo_trials': len(study.trials), 'artifact_path': model_path,
+                    'accuracy': float(accuracy_score(y_test, predictions)) if classification else None}
                 trained[name] = fitted
             except Exception as error:
                 comparison[name] = {'status': 'Failed', 'metric': None, 'error': str(error)}
             self.update_models_comparison_db(project_id, comparison)
         if not trained: raise ValueError('All candidate models failed to train')
-        champion_name = (max if classification else min)(trained, key=lambda name: comparison[name]['metric'])
+        champion_name = (max if classification else min)(trained, key=lambda name: comparison[name]['validation_metric'])
         champion = trained[champion_name]
         preprocessing = champion.named_steps['preprocess']
         encoded = preprocessing.transform(X_test.head(30))
@@ -113,10 +108,14 @@ class TrainingWorker:
             if not hasattr(estimator, 'feature_importances_'): raise ValueError('Tree SHAP unavailable for this estimator')
             explainer = shap.TreeExplainer(estimator)
             values = explainer.shap_values(encoded)
-            if isinstance(values, list): values = values[-1]
+            if isinstance(values, list): values = np.stack(values, axis=-1)
             values = np.asarray(values)
-            if values.ndim == 3: values = values[:, :, -1]
-            global_values = np.abs(values).mean(axis=0)
+            if values.ndim == 3:
+                global_values = np.abs(values).mean(axis=(0, 2))
+                class_index = int(champion.predict_proba(X_test.head(1))[0].argmax())
+                values = values[:, :, class_index]
+            else:
+                global_values = np.abs(values).mean(axis=0)
             for index in np.argsort(np.abs(values[0]))[::-1][:8]:
                 local_drivers.append({'feature': names[index], 'value': str(round(float(encoded[0,index]),4)), 'impact': f'{float(values[0,index]):+.4f} SHAP'})
         except Exception:
@@ -130,5 +129,4 @@ class TrainingWorker:
         probability = float(champion.predict_proba(row)[0].max()) if classification else None
         local = {'customerId': str(row.index[0]), 'prediction': str(prediction), 'probability': probability, 'risk': f'Predicted class: {prediction}' if classification else f'Predicted value: {float(prediction):.4f}', 'drivers': local_drivers, 'explanation_method': explanation_method}
         score = comparison[champion_name]['metric']
-        trials = [{'trial': trial.number+1, 'params': trial.params, 'f1': trial.value, 'status': 'Completed (Best)' if trial.number == study.best_trial.number else 'Completed'} for trial in study.trials]
         return {'best_model': champion_name, 'best_f1': score if classification else None, 'best_mse': None if classification else score, 'best_accuracy': comparison[champion_name]['accuracy'], 'trials_run': len(trained), 'hpo_trials': trials, 'top_features': [item['feature'] for item in global_importance[:8]], 'shap_global': global_importance, 'shap_local': local, 'model_path': comparison[champion_name]['artifact_path'], 'models_comparison': comparison}

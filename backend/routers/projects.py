@@ -109,6 +109,14 @@ def get_presigned_download_dataset(project_id: str, imputation_method: str = Non
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate presigned download URL: {e}")
 
+def selected_model_path(card, model_name=None):
+    if not model_name:
+        return card.model_path
+    candidate = (card.models_comparison_json or {}).get(model_name)
+    if not candidate or candidate.get('status') != 'Trained' or not candidate.get('artifact_path'):
+        raise HTTPException(status_code=404, detail='Trained model artifact not found')
+    return candidate['artifact_path']
+
 @router.get("/{project_id}/presigned-download-model")
 def get_presigned_download_model(project_id: str, model_name: str = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id, Project.username == current_user.username).first()
@@ -116,15 +124,8 @@ def get_presigned_download_model(project_id: str, model_name: str = None, curren
     if not project or not card or not card.model_path:
         raise HTTPException(status_code=404, detail="Model binary not found for this project")
     
-    path = card.model_path
-    if model_name:
-        m_slug = model_name.lower().replace(" ", "_")
-        if path.startswith("s3://"):
-            path = f"s3://aidso-runs/models/{project_id}/{m_slug}.pkl"
-        elif path.startswith("file://"):
-            folder = os.path.dirname(path[7:])
-            path = 'file://' + os.path.join(folder, f'{project_id}_{m_slug}.pkl')
-            
+    path = selected_model_path(card, model_name)
+
     try:
         signed_url = storage.generate_presigned_download_url(path)
         return {"url": signed_url}
@@ -386,15 +387,8 @@ def download_model(project_id: str, model_name: str = None, current_user: User =
         raise HTTPException(status_code=404, detail="Model binary not found or unauthorized")
         
     try:
-        path = card.model_path
-        if model_name:
-            m_slug = model_name.lower().replace(" ", "_")
-            if path.startswith("s3://"):
-                path = f"s3://aidso-runs/models/{project_id}/{m_slug}.pkl"
-            elif path.startswith("file://"):
-                folder = os.path.dirname(path[7:])
-                path = 'file://' + os.path.join(folder, f'{project_id}_{m_slug}.pkl')
-                
+        path = selected_model_path(card, model_name)
+
         model_bytes = storage.download_file(path)
         
         # Parse dataset name from project.dataset_path

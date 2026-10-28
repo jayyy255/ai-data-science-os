@@ -35,7 +35,19 @@ class DatasetService:
             num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
             cat_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
             numerical_count = len(num_cols)
-            categorical_count = len(cat_cols)
+            semantic_types = {col: 'numerical' for col in num_cols}
+            for col in cat_cols:
+                samples = df[col].dropna().astype(str).head(100)
+                date_shaped = len(samples) > 0 and samples.str.match(r'^\d{4}[-/]\d{1,2}[-/]\d{1,2}').all()
+                if date_shaped and pd.to_datetime(samples, errors='coerce', format='mixed').notna().all():
+                    semantic_types[col] = 'datetime'
+                elif len(samples) and (samples.str.len().mean() >= 80 or samples.str.split().str.len().mean() >= 8):
+                    semantic_types[col] = 'text'
+                else:
+                    semantic_types[col] = 'categorical'
+            categorical_count = sum(kind == 'categorical' for kind in semantic_types.values())
+            datetime_count = sum(kind == 'datetime' for kind in semantic_types.values())
+            text_count = sum(kind == 'text' for kind in semantic_types.values())
             
             duplicates_count = int(df.duplicated().sum())
             outliers_count = 0
@@ -112,11 +124,13 @@ class DatasetService:
                 missing_val = int(col_data.isnull().sum())
                 col_missing_pct = float(missing_val / len(df) * 100) if len(df) > 0 else 0.0
                 unique_val = int(col_data.nunique())
-                sample_val = str(col_data.iloc[0]) if len(col_data) > 0 else "N/A"
+                present = col_data.dropna()
+                sample_val = str(present.iloc[0]) if len(present) > 0 else "N/A"
                 
                 features_metadata.append({
                     "name": col,
                     "type": str(col_data.dtype),
+                    "semantic_type": semantic_types[col],
                     "missing": round(col_missing_pct, 2),
                     "unique": unique_val,
                     "sample": sample_val,
@@ -130,6 +144,8 @@ class DatasetService:
                 "missing_pct": missing_pct,
                 "numerical_count": numerical_count,
                 "categorical_count": categorical_count,
+                "datetime_count": datetime_count,
+                "text_count": text_count,
                 "is_imbalanced": is_imbalanced,
                 "quality_health": quality_health,
                 "class_distribution": class_distribution,

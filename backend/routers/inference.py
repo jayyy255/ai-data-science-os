@@ -105,14 +105,22 @@ def explain(project_id: str, row_index: int, user: User = Depends(get_current_us
     method = 'Local SHAP unavailable for this model'
     try:
         import shap
-        explanation = shap.TreeExplainer(estimator).shap_values(values)
+        if hasattr(estimator, 'feature_importances_'):
+            explanation = shap.TreeExplainer(estimator).shap_values(values)
+            method = 'SHAP'
+        else:
+            if values.shape[1] > 128: raise ValueError('Too many transformed features for interactive permutation SHAP')
+            background = preprocessing.transform(frame.drop(columns=[project.target_variable]).head(20))
+            explainer = shap.Explainer(estimator.predict_proba if classification else estimator.predict,
+                                      background, algorithm='permutation', seed=42)
+            explanation = explainer(values, max_evals=max(2 * values.shape[1] + 1, 20)).values
+            method = 'Permutation SHAP'
         class_index = int(wrapped.encoder_.transform([prediction])[0]) if classification else 0
         if isinstance(explanation, list): explanation = explanation[class_index]
         explanation = np.asarray(explanation)
         if explanation.ndim == 3: explanation = explanation[:, :, class_index]
         for index in np.argsort(np.abs(explanation[0]))[::-1][:8]:
             drivers.append({'feature': names[index], 'value': str(round(float(values[0,index]), 4)), 'impact': f'{float(explanation[0,index]):+.4f} SHAP'})
-        method = 'SHAP'
     except Exception:
         pass
     return {'customerId': str(row_index), 'prediction': str(prediction), 'probability': float(model.predict_proba(row)[0].max()) if classification else None, 'risk': f'Predicted class: {prediction}' if classification else f'Predicted value: {float(prediction):.4f}', 'drivers': drivers, 'explanation_method': method}

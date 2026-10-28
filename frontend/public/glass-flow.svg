@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" fill="none">
+  <defs>
+    <linearGradient id="ice" x1="160" y1="160" x2="1470" y2="900" gradientUnits="userSpaceOnUse"><stop stop-color="#dcfbff" stop-opacity=".6"/><stop offset=".48" stop-color="#8cb9ed"/><stop offset="1" stop-color="#829cdd"/></linearGradient>
+    <linearGradient id="blue" x1="160" y1="160" x2="1470" y2="900" gradientUnits="userSpaceOnUse"><stop stop-color="#b8e5f7" stop-opacity=".2"/><stop offset=".48" stop-color="#8cb9ed" stop-opacity=".65"/><stop offset="1" stop-color="#a9e8f1"/></linearGradient>
+    <linearGradient id="edge" x1="160" y1="160" x2="1470" y2="900" gradientUnits="userSpaceOnUse"><stop stop-color="#dcfbff" stop-opacity="0"/><stop offset=".4" stop-color="#b8e5f7" stop-opacity=".5"/><stop offset=".72" stop-color="#a8bcec" stop-opacity=".35"/><stop offset="1" stop-color="#a9e8f1" stop-opacity="0"/></linearGradient>
+    <filter id="blend" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="32"/></filter>
+    <filter id="glow" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="24"/></filter>
+  </defs>
+  <g filter="url(#blend)">
+    <path d="M-180 690C160 180 500 900 850 400C1110 20 1280-120 1710 40L1740 1100H-180Z" fill="url(#ice)"/>
+    <path d="M660 1100C640 760 1440 720 1180 290C1040 60 1380-140 1740-80V1100Z" fill="url(#blue)"/>
+  </g>
+  <g filter="url(#glow)" stroke="url(#edge)" stroke-width="40">
+    <path d="M-180 690C160 180 500 900 850 400C1110 20 1280-120 1710 40"/>
+    <path d="M660 1100C640 760 1440 720 1180 290C1040 60 1380-140 1740-80"/>
+  </g>
+</svg>

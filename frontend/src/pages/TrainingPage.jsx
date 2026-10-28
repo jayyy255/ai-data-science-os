@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
-import { Cpu, RefreshCw, Layers, CheckCircle2, Server, Play, HelpCircle, Activity, Sparkles } from 'lucide-react';
+import { RefreshCw, Layers, Play, Sparkles } from 'lucide-react';
 
 export default function TrainingPage() {
   const { getActiveProject, triggerTraining, fetchProjectDetails, fetchProjectJobs, projectJobs } = useProjectStore();
@@ -57,14 +57,14 @@ export default function TrainingPage() {
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="page-heading flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-display font-bold text-white tracking-tight">Model Training & HPO</h1>
           <p className="text-sm text-zinc-400">Asynchronous database queue training pipeline and Optuna HPO optimization.</p>
         </div>
-        
+
         {!isTraining ? (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="flex flex-col text-right">
               <span className="text-[10px] text-zinc-500 font-mono font-bold uppercase">Training Dataset</span>
               <select
@@ -78,7 +78,7 @@ export default function TrainingPage() {
                 <option value="KNN">KNN Imputation</option>
               </select>
             </div>
-            
+
             <button
               onClick={handleStartTraining}
               className="flex items-center gap-1.5 bg-brand-primary hover:bg-brand-primary-hover px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all cursor-pointer shadow-lg shadow-brand-primary/20"
@@ -105,9 +105,9 @@ export default function TrainingPage() {
             </div>
             <span className="text-zinc-500 font-bold">{trainedCount} of {totalModels} models completed ({progressPercent}%)</span>
           </div>
-          
+
           <div className="w-full bg-brand-dark-bg h-2.5 rounded-full overflow-hidden border border-brand-dark-border/40">
-            <div 
+            <div
               className="bg-brand-primary h-full transition-all duration-500 shadow-[0_0_8px_rgba(124,58,237,0.5)]"
               style={{ width: `${Math.max(5, progressPercent)}%` }}
             ></div>
@@ -138,7 +138,7 @@ export default function TrainingPage() {
       {/* Tab 1: Live Database Queue Node Graph */}
       {activeTab === 'pipeline' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             {['Uploaded dataset', 'Train / validation / test split', 'Model fitting & comparison', 'Saved inference pipelines'].map((stage, index) => <div key={stage} className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5"><span className="text-violet-400 font-mono">{index+1}</span><p className="mt-2 text-sm">{stage}</p></div>)}
           </div>
 
@@ -150,21 +150,21 @@ export default function TrainingPage() {
             </h3>
 
             {/* Model Comparison Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               {Object.keys(models).map((modelName) => {
                 const modelData = models[modelName];
                 const isModelTraining = modelData.status === 'Training';
                 const isModelTrained = modelData.status === 'Trained';
-                
+
                 return (
                   <div key={modelName} className="bg-brand-dark-bg/60 border border-brand-dark-border rounded-xl p-4 space-y-2 relative overflow-hidden">
                     <span className="text-[10px] font-mono text-zinc-500 uppercase block">{modelName}</span>
-                    
+
                     <div className="flex items-center justify-between mt-1">
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        isModelTrained 
+                        isModelTrained
                           ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : isModelTraining 
+                          : isModelTraining
                             ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
                             : 'bg-zinc-800 text-zinc-500 border border-brand-dark-border'
                       }`}>
@@ -182,8 +182,8 @@ export default function TrainingPage() {
 
                     {/* Progress Bar indicator */}
                     <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden mt-2">
-                      <div 
-                        className={`h-full transition-all duration-500 ${isModelTrained ? 'bg-emerald-500 w-full' : isModelTraining ? 'bg-amber-500 w-1/2 animate-pulse' : 'w-0'}`} 
+                      <div
+                        className={`h-full transition-all duration-500 ${isModelTrained ? 'bg-emerald-500 w-full' : isModelTraining ? 'bg-amber-500 w-1/2 animate-pulse' : 'w-0'}`}
                       />
                     </div>
                   </div>
@@ -198,7 +198,7 @@ export default function TrainingPage() {
                 {Object.keys(models).map((modelName) => {
                   const modelData = models[modelName];
                   const hasMetric = modelData.metric !== null;
-                  
+
                   // Compute bar width percentage
                   // Standardize: if metric is classification (F1, max=1.0) we map directly. If loss (MSE, smaller is better), we map inverse.
                   let pct = 0;
@@ -207,7 +207,7 @@ export default function TrainingPage() {
                       pct = modelData.metric * 100;
                     } else {
                       // Regressor: smaller is better, let's normalize against max or arbitrary threshold
-                      pct = Math.max(10, 100 - (modelData.metric / 100)); 
+                      pct = Math.max(10, 100 - (modelData.metric / 100));
                     }
                   }
 
@@ -215,11 +215,11 @@ export default function TrainingPage() {
                     <div key={modelName} className="flex items-center gap-3 text-xs">
                       <span className="w-32 font-medium text-zinc-300 truncate">{modelName}</span>
                       <div className="flex-1 bg-brand-dark-bg/60 border border-brand-dark-border h-6 rounded-lg overflow-hidden flex items-center pr-3">
-                        <div 
-                          style={{ width: `${pct}%` }} 
+                        <div
+                          style={{ width: `${pct}%` }}
                           className={`h-full transition-all duration-1000 ${
-                            modelName === project.bestModel 
-                              ? 'bg-brand-primary' 
+                            modelName === project.bestModel
+                              ? 'bg-brand-primary'
                               : 'bg-brand-primary/40'
                           }`}
                         />
@@ -239,20 +239,20 @@ export default function TrainingPage() {
       {/* Tab 2: Optuna Trials list */}
       {activeTab === 'trials' && (
         <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl overflow-hidden shadow-xl">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" role="region" aria-label="Scrollable data table" tabIndex={0}>
             <table className="w-full text-left text-sm">
               <thead className="bg-brand-dark-bg/60 border-b border-brand-dark-border text-zinc-400 font-mono text-xs">
                 <tr>
                   <th className="p-4">Trial ID</th>
-                  <th className="p-4">Hyperparameter Parameters</th>
-                  <th className="p-4 text-center">Validation Metric</th>
+                  <th className="p-4">Model</th><th className="p-4">Hyperparameter Parameters</th>
+                  <th className="p-4 text-center">{project.problemType === 'regression' ? 'Validation MSE' : 'Validation F1 (weighted)'}</th>
                   <th className="p-4">Optimization Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-brand-dark-border/40 text-zinc-300">
                 {project.hpoTrials?.map((tr, idx) => (
                   <tr key={idx} className="hover:bg-brand-dark-card/40 transition-colors">
-                    <td className="p-4 font-semibold text-zinc-100 font-mono">Trial #{tr.trial}</td>
+                    <td className="p-4 font-semibold text-zinc-100 font-mono">Trial #{tr.trial}</td><td className="p-4">{tr.model || 'Random Forest'}</td>
                     <td className="p-4">
                       <code className="text-xs bg-brand-dark-bg border border-brand-dark-border px-2 py-1 rounded text-violet-300 font-mono">
                         {JSON.stringify(tr.params)}
@@ -294,7 +294,7 @@ export default function TrainingPage() {
             <h3 className="text-sm font-semibold text-zinc-200">HPO & Model Training History</h3>
             <p className="text-xs text-zinc-500 font-mono">Audited history of training jobs executed on this project</p>
           </div>
-          <button 
+          <button
             onClick={() => fetchProjectJobs(project.id)}
             className="text-xs text-brand-primary hover:text-violet-300 font-semibold flex items-center gap-1 cursor-pointer"
           >
@@ -303,7 +303,7 @@ export default function TrainingPage() {
           </button>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" role="region" aria-label="Scrollable data table" tabIndex={0}>
           {projectJobs[project.id] && projectJobs[project.id].length > 0 ? (
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -322,7 +322,7 @@ export default function TrainingPage() {
                   const isCompleted = job.status === 'completed';
                   const isFailed = job.status === 'failed';
                   const isRunning = job.status === 'running';
-                  
+
                   return (
                     <tr key={job.id} className="hover:bg-brand-dark-bg/20 font-mono">
                       <td className="py-3 px-3 font-semibold">#{job.id}</td>
@@ -330,7 +330,7 @@ export default function TrainingPage() {
                       <td className="py-3 px-3 text-violet-400 font-bold">{job.imputation_method || 'Median'}</td>
                       <td className="py-3 px-3">
                         <span className={`px-2 py-0.5 rounded-full font-semibold ${
-                          isCompleted 
+                          isCompleted
                             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                             : isFailed
                               ? 'bg-red-500/10 text-red-400 border border-red-500/20'

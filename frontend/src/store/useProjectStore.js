@@ -26,7 +26,7 @@ function mapProject(project, card = {}, eda = project.eda_profile_json || {}) {
     qualityHealth: eda.quality_health ?? {}, features: eda.features ?? [],
     classDistribution: eda.class_distribution ?? [], correlations: eda.correlations ?? emptyProject.correlations,
     distributions: eda.distributions ?? {},
-    structure: { numerical: eda.numerical_count ?? 0, categorical: eda.categorical_count ?? 0, datetime: 0, text: 0 },
+    structure: { numerical: eda.numerical_count ?? 0, categorical: eda.categorical_count ?? 0, datetime: eda.datetime_count ?? 0, text: eda.text_count ?? 0 },
   };
 }
 export const useProjectStore = create((set, get) => ({
@@ -120,6 +120,7 @@ export const useProjectStore = create((set, get) => ({
     } catch (err) { set({ error: errorMessage(err) }); throw err; }
   },
   createProject: async (name, targetVariable, description, file, problemType = 'auto') => {
+    set({ error: '' });
     const form = new FormData();
     form.append('name', name.trim()); form.append('target_variable', targetVariable.trim());
     form.append('description', description); form.append('file', file); form.append('problem_type', problemType);

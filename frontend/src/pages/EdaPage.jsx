@@ -1,8 +1,9 @@
 import { downloadFile } from '../api';
+import MarkdownContent from '../components/MarkdownContent';
 import React, { useState, useEffect } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
-import { HelpCircle, Sparkles, Info } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 export default function EdaPage() {
   const { getActiveProject } = useProjectStore();
@@ -29,12 +30,12 @@ export default function EdaPage() {
   }, [project.id, project.distributions]);
 
   const selectedFeatureObj = project.features?.find(f => f.name === selectedFeature);
-  const isNumericalFeature = selectedFeatureObj 
-    ? (selectedFeatureObj.type?.includes('int') || selectedFeatureObj.type?.includes('float')) 
+  const isNumericalFeature = selectedFeatureObj
+    ? (selectedFeatureObj.type?.includes('int') || selectedFeatureObj.type?.includes('float'))
     : true;
 
   const distributionData = project.distributions?.[selectedFeature] || [];
-  const classData = project.problemType === 'regression' ? (project.distributions?.[project.targetVariable] || []).map(item => ({name:item.bin,count:item.count,color:'#7c3aed'})) : project.classDistribution || [];
+  const classData = project.problemType === 'regression' ? (project.distributions?.[project.targetVariable] || []).map(item => ({name:item.bin,count:item.count,color:'var(--chart-primary)'})) : project.classDistribution || [];
   const corrColumns = project.correlations?.columns || [];
   const corrValues = project.correlations?.values || [];
 
@@ -43,11 +44,11 @@ export default function EdaPage() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-display font-bold text-white tracking-tight">Automated EDA</h1>
-        <p className="text-sm text-zinc-400">Statistical data profiling and distributions cached in Redis.</p>
+        <p className="text-sm text-zinc-400">Statistical profiling of the uploaded dataset.</p>
       </div>
 
       {/* Tabs Toggles */}
-      <div className="flex border-b border-brand-dark-border/40 gap-6">
+      <div className="eda-tabs flex flex-wrap border-b border-brand-dark-border/40 gap-2 sm:gap-6">
         <button
           onClick={() => setActiveTab('distributions')}
           className={`pb-2.5 text-sm font-semibold transition-all cursor-pointer ${
@@ -77,16 +78,16 @@ export default function EdaPage() {
       {/* Tab 1: Distributions */}
       {activeTab === 'distributions' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
             {/* Feature distribution Area chart */}
             <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h3 className="font-semibold text-zinc-200 text-sm">Feature Density Distribution</h3>
-                  <p className="text-xs text-zinc-500 font-mono">Bimodal density curve peak detection</p>
+                  <p className="text-xs text-zinc-500 font-mono">Observed feature values and counts</p>
                 </div>
-                
+
                 {distFeatures.length > 0 && (
                   <select
                     value={selectedFeature}
@@ -106,55 +107,55 @@ export default function EdaPage() {
                     <AreaChart data={distributionData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorFeature" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.4}/>
-                          <stop offset="95%" stopColor="#7c3aed" stopOpacity={0}/>
+                          <stop offset="5%" stopColor="var(--chart-primary)" stopOpacity={0.4}/>
+                          <stop offset="95%" stopColor="var(--chart-primary)" stopOpacity={0}/>
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                      <XAxis dataKey="bin" stroke="#71717a" fontSize={11} />
-                      <YAxis stroke="#71717a" fontSize={11} />
-                      <Tooltip 
+                      <XAxis dataKey="bin" stroke="var(--chart-axis)" fontSize={11} />
+                      <YAxis stroke="var(--chart-axis)" fontSize={11} />
+                      <Tooltip
                         contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '12px' }}
-                        labelStyle={{ color: '#a78bfa', fontWeight: 'bold' }}
+                        labelStyle={{ color: '#d8e5ff', fontWeight: 'bold' }}
                       />
-                      <Area type="monotone" dataKey="count" stroke="#7c3aed" strokeWidth={2} fillOpacity={1} fill="url(#colorFeature)" />
+                      <Area type="monotone" dataKey="count" stroke="var(--chart-primary)" strokeWidth={2} fillOpacity={1} fill="url(#colorFeature)" />
                     </AreaChart>
                   ) : (
                     <BarChart data={distributionData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                      <XAxis dataKey="bin" stroke="#71717a" fontSize={11} />
-                      <YAxis stroke="#71717a" fontSize={11} />
-                      <Tooltip 
+                      <XAxis dataKey="bin" stroke="var(--chart-axis)" fontSize={11} />
+                      <YAxis stroke="var(--chart-axis)" fontSize={11} />
+                      <Tooltip
                         contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '12px' }}
                         itemStyle={{ color: '#fff' }}
                       />
-                      <Bar dataKey="count" fill="#7c3aed" radius={[8, 8, 0, 0]} maxBarSize={50} />
+                      <Bar dataKey="count" fill="var(--chart-primary)" radius={[8, 8, 0, 0]} maxBarSize={50} />
                     </BarChart>
                   )}
                 </ResponsiveContainer>
               </div>
             </div>
- 
+
             {/* Target Variable distribution Bar chart */}
             <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 space-y-4">
               <div>
                 <h3 className="font-semibold text-zinc-200 text-sm">{project.problemType === 'regression' ? 'Target Distribution' : 'Target Class Balance'} ('{project.targetVariable}')</h3>
-                <p className="text-xs text-zinc-500 font-mono">Disparity class balance metrics</p>
+                <p className="text-xs text-zinc-500 font-mono">{project.problemType === 'regression' ? 'Observed numeric target counts by interval' : 'Observed counts by target class'}</p>
               </div>
- 
+
               <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={classData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                    <XAxis dataKey="name" stroke="#71717a" fontSize={11} />
-                    <YAxis stroke="#71717a" fontSize={11} />
+                    <XAxis dataKey="name" stroke="var(--chart-axis)" fontSize={11} />
+                    <YAxis stroke="var(--chart-axis)" fontSize={11} />
                     <Tooltip
                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '12px' }}
                       itemStyle={{ color: '#fff' }}
                     />
                     <Bar dataKey="count" radius={[8, 8, 0, 0]} maxBarSize={60}>
-                      {classData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color || "#7c3aed"} />
+                      {classData.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={project.problemType === 'regression' ? 'var(--chart-primary)' : ['var(--chart-primary)', 'var(--chart-secondary)', 'var(--chart-tertiary)', 'var(--chart-quaternary)'][index % 4]} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -162,7 +163,7 @@ export default function EdaPage() {
               </div>
             </div>
           </div>
- 
+
           {/* Statistical summary panel */}
           <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 space-y-4">
             <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
@@ -172,14 +173,14 @@ export default function EdaPage() {
 
             {project.edaAnalysis ? (
               <div className="bg-brand-dark-bg/60 p-4 rounded-xl border border-brand-dark-border/40 text-sm leading-relaxed text-zinc-300 font-medium">
-                {project.edaAnalysis}
+                <MarkdownContent>{project.edaAnalysis}</MarkdownContent>
               </div>
             ) : (
               <div className="text-xs text-zinc-500 font-mono italic">
                 No custom assessment report found. Generate profile stats by loading a dataset.
               </div>
             )}
- 
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-zinc-400 pt-4 border-t border-brand-dark-border/30">
               <ul className="space-y-2.5 list-disc pl-4">
                 <li>
@@ -191,10 +192,10 @@ export default function EdaPage() {
               </ul>
               <ul className="space-y-2.5 list-disc pl-4">
                 <li>
-                  <strong className="text-zinc-200">Class Balance:</strong> Target column class balance is mapped dynamically, showing {classData.length} unique labels.
+                  <strong className="text-zinc-200">{project.problemType === 'regression' ? 'Target Distribution:' : 'Class Balance:'}</strong> {project.problemType === 'regression' ? `${classData.length} numeric intervals are displayed; class balance does not apply.` : `${classData.length} target labels are displayed.`}
                 </li>
                 <li>
-                  <strong className="text-zinc-200">Imbalance Resolution:</strong> The pipeline is configured to use <strong className="text-amber-400 font-mono">{project.balancingMethod || 'None'}</strong> strategy for HPO training validation.
+                  <strong className="text-zinc-200">Training Split:</strong> {project.problemType === 'regression' ? 'Separate training, validation, and test partitions.' : 'Class-stratified training, validation, and test partitions.'}
                 </li>
               </ul>
             </div>
@@ -211,34 +212,35 @@ export default function EdaPage() {
           </div>
 
           {/* Heatmap visualization */}
-          <div className="max-w-xl mx-auto space-y-4">
-            <div 
-              style={{ gridTemplateColumns: `repeat(${corrColumns.length + 1}, minmax(0, 1fr))` }} 
+          <div className="max-w-full overflow-x-auto" aria-label="Scrollable correlation matrix" tabIndex={0}>
+            <div className="min-w-[560px] max-w-xl mx-auto space-y-4">
+            <div
+              style={{ gridTemplateColumns: `repeat(${corrColumns.length + 1}, minmax(0, 1fr))` }}
               className="grid gap-1.5 text-center font-mono text-[10px] text-zinc-500"
             >
               <div></div>
               {corrColumns.map((col, idx) => (
-                <div key={idx} className="truncate" title={col}>{col}</div>
+                <div key={idx} className="break-words" title={col}>{col}</div>
               ))}
             </div>
 
             <div className="space-y-1.5">
               {corrColumns.map((rowCol, rIdx) => (
-                <div 
-                  key={rIdx} 
-                  style={{ gridTemplateColumns: `repeat(${corrColumns.length + 1}, minmax(0, 1fr))` }} 
+                <div
+                  key={rIdx}
+                  style={{ gridTemplateColumns: `repeat(${corrColumns.length + 1}, minmax(0, 1fr))` }}
                   className="grid gap-1.5 items-center font-mono text-[10px]"
                 >
-                  <div className="text-right pr-2 font-semibold text-zinc-400 truncate" title={rowCol}>{rowCol}</div>
+                  <div className="text-right pr-2 font-semibold text-zinc-400 break-words" title={rowCol}>{rowCol}</div>
                   {corrColumns.map((colCol, cIdx) => {
                     const val = corrValues[rIdx]?.[cIdx] ?? 0;
                     const isDiagonal = rIdx === cIdx;
-                    const bgClass = isDiagonal 
-                      ? 'bg-brand-primary text-white font-bold' 
-                      : val > 0.4 
+                    const bgClass = isDiagonal
+                      ? 'bg-brand-primary text-white font-bold'
+                      : val > 0.4
                         ? 'bg-brand-primary/60 text-white font-bold'
-                        : val < -0.2 
-                          ? 'bg-red-500/20 text-red-400' 
+                        : val < -0.2
+                          ? 'bg-red-500/20 text-red-400'
                           : 'bg-zinc-800 text-zinc-400';
                     return (
                       <div key={cIdx} className={`${bgClass} p-2 text-center rounded`} title={`Correlation between ${rowCol} and ${colCol}`}>
@@ -265,6 +267,7 @@ export default function EdaPage() {
                 Weak Correlation
               </span>
             </div>
+            </div>
           </div>
         </div>
       )}
@@ -279,7 +282,7 @@ export default function EdaPage() {
                 <h3 className="font-semibold text-zinc-200 text-sm">Feature Completeness & Null Counts</h3>
                 <p className="text-xs text-zinc-500 font-mono">Features requiring values restoration</p>
               </div>
-              
+
               <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
                 {project.features && project.features.some(f => f.missing > 0) ? (
                   project.features.filter(f => f.missing > 0).map(f => (
@@ -311,7 +314,7 @@ export default function EdaPage() {
                 <p className="text-xs text-zinc-500 font-mono">Restoration performance results evaluated on raw profiles</p>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto" role="region" aria-label="Scrollable data table" tabIndex={0}>
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
                     <tr className="border-b border-brand-dark-border text-zinc-500 text-xs uppercase font-mono">

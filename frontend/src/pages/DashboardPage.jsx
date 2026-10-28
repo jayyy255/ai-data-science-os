@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useProjectStore } from '../store/useProjectStore';
-import { Plus, Play, CheckCircle2, AlertTriangle, ArrowRight, Activity, Cpu, Database, CpuIcon } from 'lucide-react';
+import { Plus, CheckCircle2, ArrowRight, Activity, Cpu, Database, CpuIcon } from 'lucide-react';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -14,7 +14,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Top Banner Header */}
-      <div className="flex items-center justify-between">
+      <div className="page-heading flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-display font-bold text-white tracking-tight">Dashboard Overview</h1>
           <p className="text-sm text-zinc-400">Manage your local S3 datasets, experiments, and model explanations.</p>
@@ -76,16 +76,16 @@ export default function DashboardPage() {
 
       {/* Projects Grid Section */}
       <div className="space-y-3">
-        <h2 className="text-xl font-display font-semibold text-zinc-200">Recent Projects</h2>
-        
+        <h2 className="text-xl font-display font-semibold text-zinc-200">All Projects</h2>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {projects.length > 0 ? (
-            projects.slice(0, 5).map((p) => {
+            projects.map((p) => {
               const isCompleted = p.status === 'Ready for Deployment';
               const isTraining = p.status === 'Training';
-              
+
               return (
-                <div 
+                <div
                   key={p.id}
                   className="bg-brand-dark-surface border border-brand-dark-border hover:border-violet-500/30 rounded-xl p-5 flex flex-col justify-between transition-all group hover:shadow-lg hover:shadow-brand-primary/5"
                 >
@@ -93,27 +93,27 @@ export default function DashboardPage() {
                     {/* Card Header */}
                     <div className="flex items-start justify-between">
                       <div>
-                        <h3 className="text-lg font-display font-bold text-zinc-100 group-hover:text-violet-300 transition-colors">
+                        <h3 className="font-dataset-name dataset-card-title text-zinc-100 group-hover:text-violet-300 transition-colors">
                           {p.name}
                         </h3>
                         <span className="text-xs font-mono text-zinc-500 uppercase">Target: {p.targetVariable}</span>
                       </div>
                       <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                        isCompleted 
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                          : isTraining 
-                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
+                        isCompleted
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          : isTraining
+                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                             : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
                       }`}>
                         {p.status}
                       </span>
                     </div>
-  
+
                     {/* Description */}
                     <p className="text-sm text-zinc-400 leading-relaxed line-clamp-2">
                       {p.description}
                     </p>
-  
+
                     {/* Summary Specs */}
                     <div className="grid grid-cols-3 gap-2 pt-2 border-t border-brand-dark-border/40 text-center font-mono">
                       <div className="bg-brand-dark-bg/60 p-2 rounded-lg border border-brand-dark-border/20">
@@ -129,19 +129,19 @@ export default function DashboardPage() {
                         <p className="text-xs font-bold text-violet-300 mt-0.5 truncate">{p.bestModel}</p>
                       </div>
                     </div>
-  
+
                     {/* Model score */}
-                    {p.bestF1 && (
+                    {(p.problemType === 'regression' ? p.bestMse : p.bestF1) != null && (
                       <div className="flex items-center justify-between text-xs bg-emerald-500/5 border border-emerald-500/10 p-2.5 rounded-xl">
                         <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
                           <CheckCircle2 className="w-4 h-4" />
-                          <span>Best Score (F1)</span>
+                          <span>{p.problemType === 'regression' ? 'Test MSE' : 'Test F1 (weighted)'}</span>
                         </div>
-                        <span className="font-mono font-bold text-emerald-400 text-sm">{p.bestF1}</span>
+                        <span className="font-mono font-bold text-emerald-400 text-sm">{p.problemType === 'regression' ? p.bestMse?.toFixed(4) : p.bestF1?.toFixed(4)}</span>
                       </div>
                     )}
                   </div>
-  
+
                   {/* Card Actions */}
                   <div className="flex items-center gap-3 mt-5 pt-3 border-t border-brand-dark-border/40">
                     <button

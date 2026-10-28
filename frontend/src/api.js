@@ -13,7 +13,10 @@ export const errorMessage = (error) => {
 };
 export async function downloadFile(path, filename) {
   const response = await api.get(path, { responseType: 'blob' });
-  const url = URL.createObjectURL(response.data);
+  saveBlob(response.data, filename);
+}
+export function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = filename;

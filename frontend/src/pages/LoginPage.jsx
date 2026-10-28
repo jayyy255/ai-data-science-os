@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/useProjectStore';
+import ThemeToggle from '../components/ThemeToggle';
 import { BrainCircuit, KeyRound, Mail, ShieldCheck, User, AlertCircle, CheckCircle } from 'lucide-react';
  
 export default function LoginPage() {
@@ -92,7 +93,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-brand-dark-bg text-zinc-100 flex font-body">
+    <div className="auth-shell min-h-screen text-zinc-100 flex font-body">
+      <div className="absolute top-5 right-5 z-20"><ThemeToggle /></div>
       {/* Left Pane - Art & Context */}
       <div className="hidden lg:flex w-1/2 relative bg-neutral-950 items-center justify-center border-r border-brand-dark-border overflow-hidden">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-brand-primary/10 rounded-full blur-[120px] pointer-events-none"></div>
@@ -131,8 +133,8 @@ export default function LoginPage() {
       </div>
 
       {/* Right Pane - Form Card */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-brand-dark-bg">
-        <div className="w-full max-w-md space-y-6 bg-brand-dark-surface/40 p-8 rounded-2xl border border-brand-dark-border/60 shadow-xl backdrop-blur-md">
+      <div className="w-full lg:w-1/2 flex items-center justify-center px-3 py-20 sm:p-8 bg-brand-dark-bg">
+        <div className="auth-panel w-full max-w-md space-y-6 p-5 sm:p-8 rounded-2xl border border-brand-dark-border/60 shadow-xl backdrop-blur-md">
           <div className="space-y-2 text-center lg:text-left">
             <h3 className="text-2xl font-display font-bold text-white font-semibold">
               {isForgotPassword 

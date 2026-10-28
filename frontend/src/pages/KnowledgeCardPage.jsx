@@ -1,6 +1,7 @@
 import React from 'react';
+import { saveBlob } from '../api';
 import { useProjectStore } from '../store/useProjectStore';
-import { FileText, ArrowUpRight, CheckCircle2, Server, HelpCircle, Archive, Sliders, Database } from 'lucide-react';
+import { FileText, Archive, Sliders, Database } from 'lucide-react';
 
 export default function KnowledgeCardPage() {
   const { getActiveProject } = useProjectStore();
@@ -9,7 +10,7 @@ export default function KnowledgeCardPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-display font-bold text-white tracking-tight">Knowledge Card Dashboard</h1>
           <p className="text-sm text-zinc-400">The centerpiece knowledge representation summarizing the model architecture, preparatives, and memory logs.</p>
@@ -17,15 +18,7 @@ export default function KnowledgeCardPage() {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={() => {
-              const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(project, null, 2));
-              const downloadAnchor = document.createElement('a');
-              downloadAnchor.setAttribute("href", dataStr);
-              downloadAnchor.setAttribute("download", `knowledge_card_${project.id}.json`);
-              document.body.appendChild(downloadAnchor);
-              downloadAnchor.click();
-              downloadAnchor.remove();
-            }}
+            onClick={() => saveBlob(new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }), `knowledge_card_${project.id}.json`)}
             className="flex items-center gap-1.5 bg-brand-primary hover:bg-brand-primary-hover px-4 py-2 rounded-xl text-sm font-bold text-white transition-all cursor-pointer shadow-lg shadow-brand-primary/20"
           >
             <Archive className="w-4 h-4" />
@@ -35,8 +28,8 @@ export default function KnowledgeCardPage() {
       </div>
 
       {/* Flagship Three-Column Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
-        
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-stretch">
+
         {/* Level 1: Executive Summary */}
         <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 flex flex-col justify-between hover:shadow-xl hover:shadow-brand-primary/5 transition-all">
           <div className="space-y-4">
@@ -77,7 +70,7 @@ export default function KnowledgeCardPage() {
               </div>
             </div>
           </div>
-          
+
           <div className="pt-4 border-t border-brand-dark-border/40 text-xs text-zinc-500 italic">
             Metrics and decisions from the current project record.
           </div>
@@ -156,7 +149,7 @@ export default function KnowledgeCardPage() {
                   <div className="flex justify-between font-bold text-violet-300 mb-0.5 font-display">
                     <span>{dec.feature} &rarr; {dec.overrideActive ? dec.userChoice : dec.decision}</span>
                     <span className="text-[10px] font-mono text-emerald-400">
-                      {(dec.confidence * 100).toFixed(0)}% AI
+                      Rule based
                     </span>
                   </div>
                   <p className="text-zinc-400 leading-normal text-[11px]">{dec.reason}</p>

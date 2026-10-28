@@ -25,7 +25,7 @@ export default function MonitoringPage() {
     </section>
     {result ? <section className="p-6 bg-brand-dark-surface rounded-xl border border-brand-dark-border space-y-4">
       <h2 className="font-bold">{result.driftStatus}</h2><p>Maximum PSI: {result.driftPsi.toFixed(4)} · {result.rows} observations · Alert threshold: 0.20</p>
-      <table className="w-full text-left"><thead><tr><th className="py-2">Feature</th><th>PSI</th><th>Status</th></tr></thead><tbody>{result.features.map(f=><tr key={f.feature} className="border-t border-brand-dark-border"><td className="py-3">{f.feature}</td><td>{f.psi.toFixed(4)}</td><td>{f.psi > .2 ? 'Drift detected' : 'Stable'}</td></tr>)}</tbody></table>
+      <div className="overflow-x-auto" role="region" aria-label="Scrollable drift results" tabIndex={0}><table className="w-full min-w-[420px] text-left"><thead><tr><th className="py-2">Feature</th><th>PSI</th><th>Status</th></tr></thead><tbody>{result.features.map(f=><tr key={f.feature} className="border-t border-brand-dark-border"><td className="py-3">{f.feature}</td><td>{f.psi.toFixed(4)}</td><td>{f.psi > .2 ? 'Drift detected' : 'Stable'}</td></tr>)}</tbody></table></div>
       {result.driftPsi > .2 && <button disabled={busy || project.status === 'Training'} onClick={retrain} className="bg-brand-primary rounded-lg px-4 py-2">Retrain on Original Dataset</button>}
       <p className="text-sm text-zinc-400">PSI measures feature distribution changes. Production accuracy requires labeled outcomes and is not inferred from PSI.</p>
     </section> : <p className="text-zinc-400">No monitoring data yet. Upload a CSV containing the original predictor columns.</p>}

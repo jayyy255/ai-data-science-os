@@ -1,6 +1,6 @@
 import React from 'react';
 import { useProjectStore } from '../store/useProjectStore';
-import { Calendar, Tag, CheckCircle2, ChevronRight, Activity, Clock, Server, ArrowRight } from 'lucide-react';
+import { ChevronRight, Clock, Server, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function ProjectOverviewPage() {
@@ -23,12 +23,12 @@ export default function ProjectOverviewPage() {
               {project.targetVariable}
             </span>
           </div>
-          <h1 className="text-3xl font-display font-bold text-white tracking-tight">{project.name}</h1>
+          <h1 className="font-dataset-name dataset-title text-white">{project.name}</h1>
         </div>
 
         <span className={`self-start md:self-auto px-3 py-1 rounded-full text-xs font-semibold ${
-          isCompleted 
-            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+          isCompleted
+            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
             : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
         }`}>
           Status: {project.status}
@@ -65,16 +65,16 @@ export default function ProjectOverviewPage() {
       </div>
 
       {/* Two Columns: Quick Model Info & Timeline */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
         {/* Model state */}
-        <div className="lg:col-span-1 space-y-4">
+        <div className="xl:col-span-1 space-y-4">
           <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 space-y-4">
             <h3 className="text-sm font-semibold text-zinc-200 border-b border-brand-dark-border/40 pb-2 flex items-center gap-2">
               <Server className="w-4 h-4 text-brand-primary" />
               Deployment Summary
             </h3>
-            
+
             <div className="space-y-3 text-sm">
               <div className="flex justify-between items-center">
                 <span className="text-zinc-500">Champion Model</span>
@@ -89,7 +89,7 @@ export default function ProjectOverviewPage() {
               {project.bestAccuracy != null && (
                 <div className="flex justify-between items-center">
                   <span className="text-zinc-500">Test Accuracy</span>
-                  <span className="font-semibold text-zinc-300 font-mono">{project.bestAccuracy}</span>
+                  <span className="font-semibold text-zinc-300 font-mono">{(project.bestAccuracy * 100).toFixed(1)}%</span>
                 </div>
               )}
               <div className="flex justify-between items-center">
@@ -115,7 +115,7 @@ export default function ProjectOverviewPage() {
         </div>
 
         {/* Milestone timeline */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="xl:col-span-2 space-y-4">
           <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 space-y-4">
             <div className="flex items-center justify-between border-b border-brand-dark-border/40 pb-2">
               <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
@@ -137,7 +137,7 @@ export default function ProjectOverviewPage() {
                     }`} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2">
                       <h4 className="text-sm font-semibold text-zinc-200">{evt.title}</h4>
                       <span className="text-[10px] font-mono text-zinc-500 whitespace-nowrap">{evt.time}</span>
                     </div>

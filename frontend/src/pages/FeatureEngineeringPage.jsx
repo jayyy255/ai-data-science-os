@@ -1,10 +1,10 @@
 import { downloadFile } from '../api';
 import React, { useState } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
-import { Sliders, HelpCircle, Save, Sparkles, AlertTriangle, ShieldCheck, Check, ArrowRight, Download, TrendingUp, Database, Loader2 } from 'lucide-react';
+import { Save, Sparkles, AlertTriangle, Check, ArrowRight, Download, TrendingUp, Loader2 } from 'lucide-react';
 
 export default function FeatureEngineeringPage() {
-  const { getActiveProject, applyOverride, triggerTraining, applyFeatureTransformation } = useProjectStore();
+  const { getActiveProject, triggerTraining, applyFeatureTransformation } = useProjectStore();
   const project = getActiveProject();
 
   const [saving, setSaving] = useState(false);
@@ -22,7 +22,7 @@ export default function FeatureEngineeringPage() {
   const handleApplyTransformation = async (feature) => {
     const choice = overrides[feature];
     if (!choice) return;
-    
+
     setApplying(prev => ({ ...prev, [feature]: true }));
     try {
       await applyFeatureTransformation(project.id, feature, choice);
@@ -61,8 +61,8 @@ export default function FeatureEngineeringPage() {
           <h1 className="text-3xl font-display font-bold text-white tracking-tight">Feature Engineering</h1>
           <p className="text-sm text-zinc-400">Manage automated transformations, evaluate correlation metrics, and commit custom overrides.</p>
         </div>
-        
-        <div className="flex items-center gap-3">
+
+        <div className="flex flex-wrap items-center gap-3">
           {hasTransformedFeatures && (
             <button
               onClick={handleDownloadTransformed}
@@ -98,7 +98,7 @@ export default function FeatureEngineeringPage() {
       <div className="bg-brand-dark-surface border border-brand-dark-border rounded-xl p-4 flex flex-col md:flex-row justify-between gap-4">
         <div className="flex items-center gap-2 text-sm text-zinc-400">
           <Sparkles className="w-4.5 h-4.5 text-brand-primary" />
-          <span>Average AI recommendation confidence is <strong className="text-emerald-400 font-mono">91%</strong> based on dataset features metadata.</span>
+          <span>Recommendations use missing values and column types. Review them for your modeling goal.</span>
         </div>
         <div className="text-xs font-mono text-zinc-500 self-end md:self-center">
           Decisions and training results are saved in the project database.
@@ -111,13 +111,13 @@ export default function FeatureEngineeringPage() {
           const currentChoice = overrides[dec.feature] !== undefined ? overrides[dec.feature] : (dec.overrideActive ? (dec.userChoice || '') : 'recommended');
           const isPendingApply = overrides[dec.feature] !== undefined && overrides[dec.feature] !== (dec.overrideActive ? dec.userChoice : 'recommended');
           const metrics = dec.comparisonMetrics;
-          
+
           return (
-            <div 
+            <div
               key={idx}
               className={`bg-brand-dark-surface border rounded-xl p-5 flex flex-col justify-between transition-all ${
-                dec.overrideActive 
-                  ? 'border-amber-500/30 shadow-md shadow-amber-500/2' 
+                dec.overrideActive
+                  ? 'border-amber-500/30 shadow-md shadow-amber-500/2'
                   : 'border-brand-dark-border'
               }`}
             >
@@ -128,11 +128,11 @@ export default function FeatureEngineeringPage() {
                     <h3 className="font-semibold text-zinc-200 font-mono text-base">{dec.feature}</h3>
                   </div>
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                    dec.overrideActive 
-                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
+                    dec.overrideActive
+                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                       : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                   }`}>
-                    {dec.overrideActive ? 'User Override Active' : `AI Confidence: ${(dec.confidence * 100).toFixed(0)}%`}
+                    {dec.overrideActive ? 'User Override Active' : 'Rule-based recommendation'}
                   </span>
                 </div>
 
@@ -153,7 +153,7 @@ export default function FeatureEngineeringPage() {
                   <span className="text-[10px] font-mono text-zinc-500 uppercase block">Transformation Impact Analysis</span>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="space-y-1">
-                      <span className="text-zinc-500">Target Correlation</span>
+                      <span className="text-zinc-500">Absolute Target Correlation</span>
                       <div className="flex items-center gap-1 text-zinc-300 font-mono">
                         <span>{metrics.before_corr}</span>
                         <ArrowRight className="w-3 h-3 text-zinc-500" />
@@ -169,7 +169,7 @@ export default function FeatureEngineeringPage() {
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center justify-between pt-1 border-t border-zinc-800/60 mt-1">
                     <div className="flex items-center gap-1">
                       <TrendingUp className={`w-3.5 h-3.5 ${metrics.better ? 'text-emerald-400' : 'text-zinc-500'}`} />
@@ -179,7 +179,7 @@ export default function FeatureEngineeringPage() {
                     </div>
                     {metrics.better ? (
                       <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-bold">
-                        Optimized
+                        Applied
                       </span>
                     ) : (
                       <span className="text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded">
@@ -192,20 +192,21 @@ export default function FeatureEngineeringPage() {
 
               {/* Form Controls / Dropdowns for user choice overrides */}
               <div className="mt-5 pt-3 border-t border-brand-dark-border/40 space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex flex-col gap-3">
                   <span className="text-xs text-zinc-500 font-mono">Transformation Strategy:</span>
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="flex min-w-0 items-center gap-2 w-full">
                     <select
+                      aria-label={`Transformation for ${dec.feature}`}
                       value={currentChoice}
                       onChange={(e) => handleOverrideSelect(dec.feature, e.target.value)}
-                      className="bg-brand-dark-bg border border-brand-dark-border hover:border-brand-dark-border rounded-lg text-xs font-semibold text-zinc-300 py-1.5 px-2.5 outline-none cursor-pointer flex-1 sm:flex-initial"
+                      className="min-w-0 bg-brand-dark-bg border border-brand-dark-border hover:border-brand-dark-border rounded-lg text-xs font-semibold text-zinc-300 py-1.5 px-2.5 outline-none cursor-pointer flex-1"
                     >
-                      <option value="recommended">Apply AI Recommended</option>
+                      <option value="recommended">Apply Recommended</option>
                       <option value="Impute Median">Median Imputation</option>
                       <option value="Impute Mean">Mean Imputation</option>
                       <option value="One-Hot Encoding">One-Hot Encoding</option>
                       <option value="Standard Scaling">Standard Scaling</option>
-                      <option value="Keep Raw">Keep Raw Numerical</option>
+                      <option value="Keep Raw">Keep Raw</option>
                       <option value="Discretize Binning">Discretize / Binning</option>
                     </select>
 
@@ -213,8 +214,8 @@ export default function FeatureEngineeringPage() {
                       onClick={() => handleApplyTransformation(dec.feature)}
                       disabled={applying[dec.feature] || !isPendingApply}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                        isPendingApply 
-                          ? 'bg-brand-primary hover:bg-brand-primary-hover text-white' 
+                        isPendingApply
+                          ? 'bg-brand-primary hover:bg-brand-primary-hover text-white'
                           : 'bg-zinc-800 text-zinc-500 border border-zinc-700/50 cursor-not-allowed'
                       }`}
                     >

@@ -12,7 +12,6 @@ export default function CreateProjectPage() {
   const [description, setDescription] = useState('');
   const [problemType, setProblemType] = useState('auto');
   const [file, setFile] = useState(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [completed, setCompleted] = useState(false);
 
@@ -20,12 +19,11 @@ export default function CreateProjectPage() {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
       setFile(selectedFile);
-      simulateUpload(selectedFile);
+      setCompleted(true);
     }
   };
 
   const [error, setError] = useState('');
-  const simulateUpload = () => { setCompleted(true); setUploadProgress(100); };
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) return;
@@ -40,7 +38,7 @@ export default function CreateProjectPage() {
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Link 
           to="/"
           className="p-2 bg-brand-dark-surface hover:bg-brand-dark-card border border-brand-dark-border text-zinc-400 hover:text-zinc-200 rounded-xl transition-all cursor-pointer"
@@ -49,7 +47,7 @@ export default function CreateProjectPage() {
         </Link>
         <div>
           <h1 className="text-2xl font-display font-bold text-white tracking-tight">Create New AI Project</h1>
-          <p className="text-xs text-zinc-400">Initialize storage buckets and trigger the Gemini project understanding engine.</p>
+          <p className="text-xs text-zinc-400">Upload a dataset, choose a target, and create a modeling workspace.</p>
         </div>
       </div>
 
@@ -60,7 +58,7 @@ export default function CreateProjectPage() {
         {/* Project Details */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-zinc-400">Project Name</label>
+            <label htmlFor="project-name" className="text-xs font-medium text-zinc-400">Project Name</label>
             <input
               type="text"
               id="project-name"
@@ -73,7 +71,7 @@ export default function CreateProjectPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-zinc-400">Target Variable Column</label>
+            <label htmlFor="target-variable" className="text-xs font-medium text-zinc-400">Target Variable Column</label>
             <input
               type="text"
               id="target-variable"
@@ -95,7 +93,7 @@ export default function CreateProjectPage() {
         </label>
         {/* Business Goal Description */}
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-zinc-400">Business Problem Description</label>
+          <label htmlFor="project-description" className="text-xs font-medium text-zinc-400">Business Problem Description</label>
           <textarea
             value={description}
             id="project-description"
@@ -125,7 +123,7 @@ export default function CreateProjectPage() {
                   <Upload className="w-6 h-6" />
                 </div>
                 <p className="text-sm font-medium text-zinc-300">Drag & drop your CSV file here, or click to browse</p>
-                <p className="text-xs text-zinc-500">Max file size: 50MB (saved locally in MinIO)</p>
+                <p className="text-xs text-zinc-500">Max file size: 50MB</p>
               </div>
             ) : (
               <div className="w-full space-y-4">
@@ -146,21 +144,8 @@ export default function CreateProjectPage() {
                   )}
                 </div>
 
-                {uploading && (
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-mono text-zinc-500">
-                      <span>Uploading and analyzing dataset...</span>
-                      <span>{uploadProgress}%</span>
-                    </div>
-                    <div className="w-full bg-brand-dark-card h-1.5 rounded-full overflow-hidden">
-                      <div 
-                        className="bg-brand-primary h-full transition-all duration-300"
-                        style={{ width: `${uploadProgress}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                )}
-                
+                {uploading && <p role="status" className="text-xs text-zinc-400">Uploading and analyzing dataset...</p>}
+
                 {completed && (
                   <p className="text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" />
@@ -173,10 +158,10 @@ export default function CreateProjectPage() {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center justify-between pt-4 border-t border-brand-dark-border/40">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 justify-between pt-4 border-t border-brand-dark-border/40">
           <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-mono">
             <AlertCircle className="w-3.5 h-3.5" />
-            <span>PostgreSQL & MinIO S3 will be synchronized.</span>
+            <span>Dataset and project records will be saved.</span>
           </div>
 
           <div className="flex items-center gap-3">

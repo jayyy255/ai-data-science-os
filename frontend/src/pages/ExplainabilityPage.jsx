@@ -34,12 +34,12 @@ export default function ExplainabilityPage() {
     <section className="p-6 bg-brand-dark-surface border border-brand-dark-border rounded-xl">
       <h2 className="font-bold mb-2">Global Feature Importance</h2>
       <p className="text-sm text-zinc-400 mb-4">{project.shapGlobal[0]?.type || 'Feature importance'}. Magnitudes show influence, not direction.</p>
-      <div className="h-80"><ResponsiveContainer width="100%" height="100%"><BarChart data={project.shapGlobal.slice(0,12)} layout="vertical" margin={{ left: 50 }}><XAxis type="number" /><YAxis type="category" dataKey="feature" width={150} /><Tooltip /><Bar dataKey="shap" fill="#8b5cf6" /></BarChart></ResponsiveContainer></div>
+      <div className="overflow-x-auto" role="region" aria-label="Scrollable feature importance chart" tabIndex={0}><div className="h-80 min-w-[480px]"><ResponsiveContainer width="100%" height="100%"><BarChart data={project.shapGlobal.slice(0,12)} layout="vertical" margin={{ left: 50 }}><XAxis type="number" /><YAxis type="category" dataKey="feature" width={150} /><Tooltip /><Bar dataKey="shap" fill="var(--chart-primary)" /></BarChart></ResponsiveContainer></div></div>
     </section>
     <section className="p-6 bg-brand-dark-surface border border-brand-dark-border rounded-xl space-y-4">
       <h2 className="font-bold">Explain a Dataset Row</h2>
-      <label className="text-sm text-zinc-400">Row index (0-{project.rowsCount - 1}) <input aria-label="Row index" type="number" min="0" max={project.rowsCount-1} value={row} onChange={e=>setRow(e.target.value)} className="bg-brand-dark-bg border border-brand-dark-border rounded-lg p-2 ml-3" /></label>
-      <button disabled={loading} onClick={explainRow} className="bg-brand-primary px-4 py-2 rounded-lg ml-3">Explain Row</button>
+      <label className="block text-sm text-zinc-400">Row index (0-{project.rowsCount - 1}) <input aria-label="Row index" type="number" min="0" max={project.rowsCount-1} value={row} onChange={e=>setRow(e.target.value)} className="bg-brand-dark-bg border border-brand-dark-border rounded-lg p-2 mt-2 block w-full sm:w-48" /></label>
+      <button disabled={loading} onClick={explainRow} className="bg-brand-primary px-4 py-2 rounded-lg">Explain Row</button>
       {local && <div className="space-y-3"><p>Prediction: <strong>{local.prediction}</strong>{local.probability != null && ` (confidence ${(local.probability*100).toFixed(1)}%)`}</p><p className="text-zinc-400 text-sm">{local.explanation_method}</p>{local.drivers.map(driver=><div key={driver.feature} className="flex justify-between border-b border-brand-dark-border py-2"><span>{driver.feature}: {driver.value}</span><span>{driver.impact}</span></div>)}</div>}
     </section>
     <section className="p-6 bg-brand-dark-surface border border-brand-dark-border rounded-xl space-y-4">

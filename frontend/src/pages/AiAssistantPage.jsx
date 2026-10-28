@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
-import { Send, Sparkles, BrainCircuit, User, ArrowRight, BookOpen, AlertTriangle } from 'lucide-react';
-import api from '../api';
+import { Send, BrainCircuit, User, BookOpen, AlertTriangle, ChevronDown } from 'lucide-react';
+import api, { errorMessage } from '../api';
+import MarkdownContent from '../components/MarkdownContent';
 
 
 export default function AiAssistantPage() {
@@ -11,6 +12,7 @@ export default function AiAssistantPage() {
   const [inputMsg, setInputMsg] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [contextExpanded, setContextExpanded] = useState(false);
   const messagesEndRef = useRef(null);
 
   const suggestionChips = [
@@ -25,7 +27,8 @@ export default function AiAssistantPage() {
   }, [project.id, project.name, getChatHistory]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const anchor = messagesEndRef.current;
+    if (anchor?.parentElement) anchor.parentElement.scrollTop = anchor.parentElement.scrollHeight;
   }, [messages, loading]);
 
   const handleSend = async (textToSend) => {
@@ -43,14 +46,14 @@ export default function AiAssistantPage() {
         question: textToSend
       });
       let responseText = res.data.answer;
-      
+
       const aiMsg = { sender: 'ai', text: responseText };
       setMessages(prev => [...prev, aiMsg]);
       addChatMessage(project.id, aiMsg);
       setLoading(false);
     } catch (err) {
       console.warn("Backend API chat failed.", err);
-      const errMsg = { sender: 'ai', text: "Failed to connect to Chat Assistant. Please check if your backend container is running and contains a valid GEMINI_API_KEY in the environment." };
+      const errMsg = { sender: 'ai', text: errorMessage(err) };
       setMessages(prev => [...prev, errMsg]);
       addChatMessage(project.id, errMsg);
       setLoading(false);
@@ -58,9 +61,14 @@ export default function AiAssistantPage() {
   };
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col lg:flex-row gap-6 items-stretch">
+    <div className="assistant-layout flex flex-col xl:flex-row gap-4 xl:gap-6 items-stretch">
       {/* Left panel: Context grounding */}
-      <div className="w-full lg:w-80 flex-shrink-0 bg-brand-dark-surface border border-brand-dark-border rounded-xl p-5 flex flex-col justify-between overflow-y-auto">
+      <div className="assistant-context w-full xl:w-72 flex-shrink-0 bg-brand-dark-surface border border-brand-dark-border rounded-xl p-4 xl:p-5 overflow-y-auto">
+        <button type="button" className="w-full flex items-center justify-between gap-3 text-sm xl:hidden" aria-expanded={contextExpanded} aria-controls="assistant-context-content" onClick={() => setContextExpanded(value => !value)}>
+          <span className="flex items-center gap-2"><BookOpen className="w-4 h-4" />Project context</span>
+          <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${contextExpanded ? 'rotate-180' : ''}`} />
+        </button>
+        <div id="assistant-context-content" className={`${contextExpanded ? 'flex' : 'hidden'} xl:flex flex-col justify-between gap-4 xl:h-full pt-4 xl:pt-0`}>
         <div className="space-y-4">
           <div className="flex items-center gap-2 border-b border-brand-dark-border/40 pb-2">
             <BookOpen className="w-4.5 h-4.5 text-brand-primary" />
@@ -70,7 +78,7 @@ export default function AiAssistantPage() {
           <div className="space-y-3.5">
             <div className="bg-brand-dark-bg/60 p-3 rounded-xl border border-brand-dark-border/20 text-xs space-y-1">
               <span className="text-[10px] text-zinc-500 font-mono uppercase">Reference Card</span>
-              <p className="font-semibold text-zinc-200">{project.name}</p>
+              <p className="font-dataset-name dataset-card-title text-zinc-200">{project.name}</p>
               <p className="text-[10px] text-zinc-400 font-mono">Status: {project.status}</p>
             </div>
 
@@ -81,7 +89,7 @@ export default function AiAssistantPage() {
                 <span className="text-violet-300 font-bold">{project.featureEngineeringDecisions?.length} logged</span>
               </div>
               <div className="flex justify-between items-center text-[10px] font-mono">
-                <span className="text-zinc-500">F1 Champion</span>
+                <span className="text-zinc-500">{project.problemType === 'regression' ? 'Test MSE' : 'Test F1'}</span>
                 <span className="text-emerald-400 font-bold">{(project.problemType === 'regression' ? project.bestMse : project.bestF1) ?? 'N/A'}</span>
               </div>
             </div>
@@ -89,19 +97,20 @@ export default function AiAssistantPage() {
             <div className="flex items-start gap-2 bg-brand-primary/5 border border-brand-primary/10 p-3 rounded-xl">
               <AlertTriangle className="w-4 h-4 text-brand-primary flex-shrink-0 mt-0.5" />
               <p className="text-[10px] text-zinc-400 leading-relaxed">
-                Assistant queries utilize context grounding. Grounding context prevents hallucinations by enforcing limits to the Knowledge Card keys.
+                Answers use this project's dataset profile, feature decisions, and training results. Review generated suggestions against your data.
               </p>
             </div>
           </div>
         </div>
 
         <div className="pt-4 border-t border-brand-dark-border/40 text-[10px] text-zinc-500 font-mono text-center">
-          Model: gemini-2.5-flash
+          Gemini when configured; project summary otherwise
+        </div>
         </div>
       </div>
 
       {/* Right panel: Chat workspace */}
-      <div className="flex-1 bg-brand-dark-surface border border-brand-dark-border rounded-xl flex flex-col overflow-hidden shadow-2xl">
+      <div className="assistant-conversation min-w-0 flex-1 bg-brand-dark-surface border border-brand-dark-border rounded-xl flex flex-col overflow-hidden shadow-2xl">
         {/* Chat header */}
         <div className="p-4 border-b border-brand-dark-border bg-brand-dark-bg/20 flex items-center gap-3">
           <div className="bg-brand-primary/10 p-2 rounded-xl border border-brand-primary/20 text-brand-primary">
@@ -109,18 +118,18 @@ export default function AiAssistantPage() {
           </div>
           <div>
             <h3 className="text-sm font-semibold text-zinc-200">Chat Assistant</h3>
-            <p className="text-[10px] font-mono text-zinc-500">Semantic retrieval active over PostgreSQL logs</p>
+            <p className="text-[10px] font-mono text-zinc-500">Context from project records and recent timeline events</p>
           </div>
         </div>
 
         {/* Message history */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4 space-y-4" aria-label="Chat messages">
           {messages.map((msg, i) => {
             const isAI = msg.sender === 'ai';
             return (
-              <div 
-                key={i} 
-                className={`flex gap-3 max-w-2xl ${isAI ? 'mr-auto' : 'ml-auto flex-row-reverse'}`}
+              <div
+                key={i}
+                className={`flex gap-3 min-w-0 max-w-2xl ${isAI ? 'mr-auto' : 'ml-auto flex-row-reverse'}`}
               >
                 <div className={`
                   w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0
@@ -130,16 +139,13 @@ export default function AiAssistantPage() {
                 </div>
 
                 <div className={`
-                  p-3.5 rounded-2xl text-sm leading-relaxed border
-                  ${isAI 
-                    ? 'bg-brand-dark-bg/60 border-brand-dark-border/40 text-zinc-200' 
+                  min-w-0 p-3.5 rounded-2xl text-sm leading-relaxed border
+                  ${isAI
+                    ? 'bg-brand-dark-bg/60 border-brand-dark-border/40 text-zinc-200'
                     : 'bg-brand-primary/10 border-brand-primary/20 text-violet-100'}
                 `}>
                   {isAI ? (
-                    <div 
-                      className="space-y-2 whitespace-pre-line"
-                      dangerouslySetInnerHTML={{ __html: msg.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }}
-                    />
+                    <MarkdownContent>{msg.text}</MarkdownContent>
                   ) : (
                     msg.text
                   )}
@@ -165,7 +171,7 @@ export default function AiAssistantPage() {
         </div>
 
         {/* Input box & suggestion chips */}
-        <div className="p-4 border-t border-brand-dark-border bg-brand-dark-bg/20 space-y-3">
+        <div className="shrink-0 p-3 sm:p-4 border-t border-brand-dark-border bg-brand-dark-bg/20 space-y-3">
           {/* Suggestion Chips */}
           <div className="flex gap-2 flex-wrap">
             {suggestionChips.map((chip, idx) => (
@@ -180,7 +186,7 @@ export default function AiAssistantPage() {
           </div>
 
           {/* Form */}
-          <form 
+          <form
             onSubmit={(e) => { e.preventDefault(); handleSend(inputMsg); }}
             className="flex gap-2"
           >
@@ -188,12 +194,14 @@ export default function AiAssistantPage() {
               type="text"
               value={inputMsg}
               onChange={(e) => setInputMsg(e.target.value)}
-              className="flex-1 bg-brand-dark-bg border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2 px-4 rounded-xl text-sm font-medium transition-all"
+              aria-label="Message to assistant"
+              className="min-w-0 flex-1 bg-brand-dark-bg border border-brand-dark-border focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none py-2 px-3 rounded-xl text-sm font-medium transition-all"
               placeholder="Ask about HPO trials or metrics..."
               disabled={loading}
             />
             <button
               type="submit"
+              aria-label="Send message"
               disabled={loading}
               className="bg-brand-primary hover:bg-brand-primary-hover p-2.5 rounded-xl text-white transition-all shadow-lg shadow-brand-primary/25 cursor-pointer flex-shrink-0"
             >
