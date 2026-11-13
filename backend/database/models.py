@@ -125,3 +125,18 @@ class WorkerHeartbeat(Base):
     __tablename__ = 'worker_heartbeats'
     id = Column(Integer, primary_key=True)
     timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class DatasetUpload(Base):
+    __tablename__ = 'dataset_uploads'
+    id = Column(String, primary_key=True)
+    username = Column(String, ForeignKey('users.username'), nullable=False, index=True)
+    path = Column(String, nullable=False, unique=True)
+    filename = Column(String, nullable=False)
+    status = Column(String, nullable=False, default='pending')
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    sha256 = Column(String, nullable=True)
+    approved_path = Column(String, nullable=True)
+    scan_engine = Column(String, nullable=True)
+    validated_at = Column(DateTime, nullable=True)

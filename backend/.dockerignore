@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+tmp/
+minio_fallback/
+__pycache__/
+*.pyc
+*.db
+*.pkl
+*.csv
+*.log
+.venv/
+venv/
+tests/

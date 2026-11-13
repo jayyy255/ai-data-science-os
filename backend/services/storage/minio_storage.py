@@ -26,6 +26,10 @@ class MinIOStorage(StorageProvider):
                 config=Config(signature_version='s3v4', connect_timeout=1, read_timeout=3, retries={'max_attempts': 0}),
                 region_name='us-east-1'
             )
+            self.upload_signing_client = boto3.client(
+                's3', endpoint_url=os.getenv('MINIO_PUBLIC_ENDPOINT', f'http://{endpoint}'),
+                aws_access_key_id=access_key, aws_secret_access_key=secret_key,
+                config=Config(signature_version='s3v4'), region_name='us-east-1')
             # Ensure bucket exists
             try:
                 self.s3.head_bucket(Bucket=self.bucket_name)
@@ -155,32 +159,6 @@ class MinIOStorage(StorageProvider):
                 os.remove(filepath)
                 return True
         return False
-
-    def generate_presigned_upload_url(self, filename: str) -> dict:
-        key = f"datasets/{filename}"
-        if self.client_enabled:
-            try:
-                url = self.s3.generate_presigned_url(
-                    ClientMethod='put_object',
-                    Params={'Bucket': self.bucket_name, 'Key': key},
-                    ExpiresIn=3600
-                )
-                return {
-                    "url": url,
-                    "method": "PUT",
-                    "fields": {},
-                    "s3_path": f"s3://{self.bucket_name}/{key}"
-                }
-            except Exception as e:
-                print(f"Failed generating MinIO presigned upload URL: {e}")
-        
-        # Fallback simulating direct upload URL pointing to the dev server upload endpoint
-        return {
-            "url": f"/api/projects/upload-local?filename={quote(filename)}",
-            "method": "POST",
-            "fields": {},
-            "s3_path": f"file://{os.path.abspath(os.path.join(self.local_fallback_dir, filename))}"
-        }
 
     def generate_presigned_download_url(self, path: str) -> str:
         if path.startswith("s3://"):

@@ -16,6 +16,13 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      # Temporary owner-requested bypass; switch back to clamav when the scanner is available.
+      - key: AIDSO_MALWARE_SCANNER
+        value: bypass
+      - key: CLAMAV_HOST
+        sync: false
+      - key: CLAMAV_PORT
+        value: "3310"
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY

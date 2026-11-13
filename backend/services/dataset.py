@@ -16,6 +16,11 @@ class DatasetService:
 
     @staticmethod
     def profile_dataset(file_bytes: bytes, target_variable: str, problem_type='auto') -> dict:
+        from services.sandbox import run_operation
+        return run_operation('profile', {'target': target_variable, 'problem_type': problem_type}, {'dataset.csv': file_bytes})
+
+    @staticmethod
+    def _profile_dataset(file_bytes: bytes, target_variable: str, problem_type='auto') -> dict:
         """
         Dynamically analyzes CSV dataset structure and quality metrics.
         """

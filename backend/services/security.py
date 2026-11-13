@@ -1,5 +1,3 @@
-import io
-import pandas as pd
 
 def validate_csv_content(content: bytes):
     """
@@ -10,7 +8,6 @@ def validate_csv_content(content: bytes):
         raise ValueError("File content is empty")
         
     # Check magic bytes for common binary signatures
-    magic = content[:4]
     binary_signatures = {
         b"\x89PNG": "PNG Image",
         b"GIF8": "GIF Image",
@@ -26,25 +23,53 @@ def validate_csv_content(content: bytes):
 
     # Verify first 50 rows can be parsed as a valid CSV
     try:
-        pd.read_csv(io.BytesIO(content), nrows=50)
-    except Exception as e:
+        from services.sandbox import run_operation
+        run_operation('validate_csv', {}, {'dataset.csv': content})
+    except ValueError as e:
         raise ValueError(f"File content could not be parsed as CSV: {e}")
 
+class ScannerUnavailable(RuntimeError):
+    pass
+
+
 def scan_file_for_virus(content: bytes) -> bool:
-    """
-    Simulates an antivirus scanning pipeline.
-    Checks for the standard EICAR anti-virus test file signature.
-    Returns True if clean, False if infected.
-    """
-    # EICAR Standard Antivirus Test File signature
-    eicar_sig = b"EICAR-STANDARD-ANTIVIRUS-TEST-FILE"
-    if eicar_sig in content:
-        return False
-        
-    # Simulated scanning delay
-    import time
-    time.sleep(0.3)
-    return True
+    """ClamAV INSTREAM, with an explicit operator-selected temporary bypass."""
+    import os
+    import socket
+    import struct
+    mode = os.getenv('AIDSO_MALWARE_SCANNER', 'clamav')
+    if mode == 'bypass':
+        # Temporary deployment setting; never silently fall back on scanner failure.
+        return True
+    if mode == 'development':
+        if os.getenv('ENVIRONMENT', 'local') != 'local':
+            raise ScannerUnavailable('Development malware checks are forbidden in production')
+        return b'EICAR-STANDARD-ANTIVIRUS-TEST-FILE' not in content
+    if mode != 'clamav':
+        raise ScannerUnavailable('Invalid malware scanner configuration')
+    try:
+        with socket.create_connection((os.getenv('CLAMAV_HOST', '127.0.0.1'), int(os.getenv('CLAMAV_PORT', '3310'))), timeout=60) as client:
+            client.sendall(b'zINSTREAM\0')
+            for offset in range(0, len(content), 65536):
+                chunk = content[offset:offset + 65536]
+                client.sendall(struct.pack('!I', len(chunk)) + chunk)
+            client.sendall(struct.pack('!I', 0))
+            reply = bytearray()
+            while len(reply) < 4096:
+                chunk = client.recv(1024)
+                if not chunk:
+                    break
+                reply.extend(chunk)
+                if b'\0' in chunk or b'\n' in chunk:
+                    break
+        response = bytes(reply).rstrip(b'\0\n')
+        if response == b'stream: OK':
+            return True
+        if response.startswith(b'stream: ') and response.endswith(b' FOUND'):
+            return False
+        raise ScannerUnavailable('Malware scanner did not confirm a clean file')
+    except (OSError, ValueError) as error:
+        raise ScannerUnavailable('Malware scanner unavailable; upload has not been approved') from error
 
 
 from fastapi import Cookie, Header, Depends, HTTPException, status

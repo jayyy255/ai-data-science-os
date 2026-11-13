@@ -1,4 +1,7 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
+
+# Trusted broker only. Execution containers never receive the Docker socket/client.
+COPY --from=docker:29-cli /usr/local/bin/docker /usr/local/bin/docker
 
 # Prevent python from writing pyc files and buffering stdout
 ENV PYTHONDONTWRITEBYTECODE=1

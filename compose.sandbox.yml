@@ -1,0 +1,18 @@
+# Explicit opt-in for a trusted, private Docker host. Never mount this socket in a job container.
+# Build the image first: docker build -f backend/Dockerfile.sandbox -t aidso-sandbox:local backend
+# Then: docker compose -f docker-compose.yml -f compose.sandbox.yml up --build
+services:
+  backend:
+    environment:
+      AIDSO_SANDBOX_IMAGE: aidso-sandbox:local
+      AIDSO_SANDBOX_MEMORY_MB: "1536"
+      AIDSO_SANDBOX_CPUS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+  worker:
+    environment:
+      AIDSO_SANDBOX_IMAGE: aidso-sandbox:local
+      AIDSO_SANDBOX_MEMORY_MB: "1536"
+      AIDSO_SANDBOX_CPUS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

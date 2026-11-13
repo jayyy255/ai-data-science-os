@@ -123,8 +123,22 @@ export const useProjectStore = create((set, get) => ({
     set({ error: '' });
     const form = new FormData();
     form.append('name', name.trim()); form.append('target_variable', targetVariable.trim());
-    form.append('description', description); form.append('file', file); form.append('problem_type', problemType);
+    form.append('description', description); form.append('problem_type', problemType);
     try {
+      if (!file || !file.name.toLowerCase().endsWith('.csv') || file.size === 0 || file.size > 50 * 1024 * 1024) {
+        throw new Error('Choose a non-empty CSV file up to 50MB.');
+      }
+      const { data: upload } = await api.post('/projects/presigned-upload-url', { filename: file.name });
+      const uploadForm = new FormData();
+      Object.entries(upload.fields || {}).forEach(([key, value]) => uploadForm.append(key, value));
+      uploadForm.append('file', file);
+      if (upload.url.startsWith('/api/')) {
+        await api.post(upload.url.slice(4), uploadForm);
+      } else {
+        const response = await fetch(upload.url, { method: 'POST', body: uploadForm });
+        if (!response.ok) throw new Error('Dataset upload failed. Please try again.');
+      }
+      form.append('dataset_path', upload.s3_path);
       const { data } = await api.post('/projects', form);
       const project = mapProject(data.project);
       localStorage.setItem('aidso-active-project', project.id);

@@ -1,0 +1,10 @@
+{
+  "Rules": [{
+    "ID": "expire-untrusted-uploads",
+    "Status": "Enabled",
+    "Filter": {"Prefix": "quarantine/"},
+    "Expiration": {"Days": 1},
+    "NoncurrentVersionExpiration": {"NoncurrentDays": 1},
+    "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}
+  }]
+}

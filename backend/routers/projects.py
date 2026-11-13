@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 import io
 import os
 import re
@@ -11,8 +12,10 @@ from database.models import Project, DecisionMemory, TimelineEvent, KnowledgeCar
 from services.dataset import DatasetService
 from services.gemini import GeminiService
 from services.storage.factory import get_storage_provider
+from services.sandbox import run_operation, SandboxError
 from services.cache import RedisCacheService
-from services.security import validate_csv_content, scan_file_for_virus, get_current_user
+from services.security import get_current_user
+from services.uploads import reserve, owned_upload, stage, validate_upload, MAX_BYTES
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -28,31 +31,18 @@ class PresignedUrlRequest(BaseModel):
     filename: str
 
 @router.post("/presigned-upload-url")
-def get_presigned_upload_url(payload: PresignedUrlRequest, current_user: User = Depends(get_current_user)):
-    try:
-        res = storage.generate_presigned_upload_url(current_user.username + "_" + __import__("uuid").uuid4().hex + "_" + os.path.basename(payload.filename))
-        return res
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate presigned upload URL: {e}")
+def get_presigned_upload_url(payload: PresignedUrlRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _, response = reserve(storage, db, current_user.username, payload.filename)
+    return response
+
 
 @router.post("/upload-local")
-async def upload_local_file(filename: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    if os.path.basename(filename) != filename or not filename.startswith(current_user.username + '_'):
-        raise HTTPException(status_code=400, detail='Invalid upload name')
-    try:
-        content = await file.read(50 * 1024 * 1024 + 1)
-        if len(content) > 50 * 1024 * 1024: raise HTTPException(status_code=400, detail='Maximum dataset size is 50MB')
-        if not filename.lower().endswith('.csv'): raise HTTPException(status_code=400, detail='Only CSV files are allowed')
-        try: validate_csv_content(content)
-        except ValueError as error: raise HTTPException(status_code=400, detail=str(error))
-        path = storage.upload_dataset(filename, content)
-        return {"status": "success", "s3_path": path}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload local file: {e}")
+async def upload_local_file(filename: str, file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    record = owned_upload(db, current_user.username, upload_id=filename)
+    content = await file.read(MAX_BYTES + 1)
+    await run_in_threadpool(stage, storage, record, content)
+    return {"status": "quarantined", "s3_path": record.path}
+
 
 @router.get("/download-local-file")
 def download_local_file(filename: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -72,7 +62,7 @@ def download_local_file(filename: str, current_user: User = Depends(get_current_
             media_type="application/octet-stream",
             headers={"content-disposition": f"attachment; filename={filename}"}
         )
-    except HTTPException:
+    except (HTTPException, SandboxError):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -86,17 +76,9 @@ def get_presigned_download_dataset(project_id: str, imputation_method: str = Non
         path = project.dataset_path
         if imputation_method:
             raw_bytes = storage.download_file(project.dataset_path)
-            import pandas as pd
-            df = pd.read_csv(io.BytesIO(raw_bytes))
-            
-            target_values = df[project.target_variable].copy()
-            df = apply_imputation(df.drop(columns=[project.target_variable]), imputation_method)
-            df[project.target_variable] = target_values
-            
-            out = io.StringIO()
-            df.to_csv(out, index=False)
-            imputed_bytes = out.getvalue().encode("utf-8")
-            
+            _, exported, _ = run_operation('impute', {'target': project.target_variable, 'method': imputation_method}, {'dataset.csv': raw_bytes}, with_audit=True)
+            imputed_bytes = exported['dataset.csv']
+
             base_filename = os.path.basename(project.dataset_path).replace(".csv", "")
             imputed_filename = f"imputed_{base_filename}_{imputation_method.lower()}.csv"
             
@@ -104,7 +86,7 @@ def get_presigned_download_dataset(project_id: str, imputation_method: str = Non
             
         signed_url = storage.generate_presigned_download_url(path)
         return {"url": signed_url}
-    except HTTPException:
+    except (HTTPException, SandboxError):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate presigned download URL: {e}")
@@ -129,7 +111,7 @@ def get_presigned_download_model(project_id: str, model_name: str = None, curren
     try:
         signed_url = storage.generate_presigned_download_url(path)
         return {"url": signed_url}
-    except HTTPException:
+    except (HTTPException, SandboxError):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate presigned download URL: {e}")
@@ -145,83 +127,30 @@ async def create_project(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    s3_path = dataset_path
-    filename = "dataset.csv"
     if file:
-        if not file.filename.lower().endswith('.csv'):
-            raise HTTPException(status_code=400, detail="Only CSV files are allowed.")
-        file_bytes = await file.read(50 * 1024 * 1024 + 1)
-        if len(file_bytes) > 50 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail='Maximum dataset size is 50MB')
-        filename = file.filename
-        s3_path = storage.upload_dataset(f"{current_user.username}_{__import__('uuid').uuid4().hex}_{os.path.basename(filename)}", file_bytes)
+        content = await file.read(MAX_BYTES + 1)
+        if not content or len(content) > MAX_BYTES:
+            raise HTTPException(400, 'Dataset must contain between 1 byte and 50MB')
+        record, _ = reserve(storage, db, current_user.username, file.filename)
+        await run_in_threadpool(stage, storage, record, content)
     elif dataset_path:
-        if not os.path.basename(dataset_path).startswith(current_user.username + '_') or (dataset_path.startswith('file://') and os.path.commonpath([os.path.abspath(dataset_path[7:]), os.path.abspath('./tmp/minio_fallback')]) != os.path.abspath('./tmp/minio_fallback')):
-            raise HTTPException(status_code=400, detail='Dataset must be uploaded by the current user')
-        filename = dataset_path.split("/")[-1]
-        try:
-            file_bytes = storage.download_file(dataset_path)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to retrieve uploaded file from S3: {e}")
+        record = owned_upload(db, current_user.username, path=dataset_path)
     else:
-        raise HTTPException(status_code=400, detail="Either file upload or dataset_path is required")
-
-    # Security validation & Antivirus check
+        raise HTTPException(400, 'Either file upload or dataset_path is required')
+    filename = record.filename
     try:
-        validate_csv_content(file_bytes)
-    except Exception as e:
-        if s3_path:
-            storage.delete_file(s3_path)
-        raise HTTPException(status_code=400, detail=str(e))
-
-    if not scan_file_for_virus(file_bytes):
-        if s3_path:
-            storage.delete_file(s3_path)
-        raise HTTPException(
-            status_code=400,
-            detail="Security Threat Detected: File was flagged by Antivirus scan and rejected."
-        )
-
-    # Enforce file size limit
-    MAX_FILE_SIZE = 50 * 1024 * 1024
-    if len(file_bytes) > MAX_FILE_SIZE:
-        if s3_path:
-            storage.delete_file(s3_path)
-        raise HTTPException(
-            status_code=400, 
-            detail=f"File exceeds maximum allowed size of 50MB (actual: {len(file_bytes) / (1024*1024):.1f}MB)"
-        )
-
-    # Dataset Intelligence Service
-    try:
-        profile = DatasetService.profile_dataset(file_bytes, target_variable, problem_type)
+        s3_path, profile = await run_in_threadpool(validate_upload, storage, db, record, target_variable, problem_type)
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error))
-    
-    # Enforce rows and columns limit
-    if profile.get("rows_count", 0) > 100000:
-        if s3_path:
-            storage.delete_file(s3_path)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Dataset rows exceed maximum allowed limit of 100,000 (actual: {profile['rows_count']})"
-        )
-    if profile.get("columns_count", 0) > 200:
-        if s3_path:
-            storage.delete_file(s3_path)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Dataset columns exceed maximum allowed limit of 200 (actual: {profile['columns_count']})"
-        )
+        raise HTTPException(400, str(error))
 
     # Gemini AI Project Understanding Agent
-    understanding = gemini.understand_project(name, description, target_variable)
+    understanding = await run_in_threadpool(gemini.understand_project, name, description, target_variable)
     understanding['problem_type'] = profile['problem_type']
     understanding['target_variable'] = target_variable
     understanding['recommended_metrics'] = ['rmse', 'mae', 'r2'] if profile['problem_type'] == 'regression' else ['f1_score', 'accuracy']
     
     # Generate the Gemini dataset summary analysis
-    eda_summary = gemini.analyze_eda_profile(name, profile)
+    eda_summary = await run_in_threadpool(gemini.analyze_eda_profile, name, profile)
     
     if not name.strip(): raise HTTPException(status_code=400, detail='Project name is required')
     import uuid
@@ -409,26 +338,10 @@ def download_model(project_id: str, model_name: str = None, current_user: User =
             media_type="application/octet-stream",
             headers={"content-disposition": f"attachment; filename={filename}"}
         )
-    except HTTPException:
+    except (HTTPException, SandboxError):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve model binary: {e}")
-
-
-def apply_imputation(df, method: str):
-    import numpy as np
-    from sklearn.impute import SimpleImputer, KNNImputer
-    if method not in {'Median', 'Mean', 'Mode', 'KNN'}:
-        raise HTTPException(status_code=400, detail='Unsupported imputation method')
-    output = df.copy().replace([np.inf, -np.inf], np.nan)
-    numeric = output.select_dtypes(include=np.number).columns.tolist()
-    if numeric:
-        imputer = KNNImputer(n_neighbors=5, keep_empty_features=True) if method == 'KNN' else SimpleImputer(strategy={'Median':'median', 'Mean':'mean', 'Mode':'most_frequent'}[method], keep_empty_features=True)
-        output[numeric] = imputer.fit_transform(output[numeric])
-    for column in output.columns.difference(numeric):
-        mode = output[column].mode()
-        output[column] = output[column].fillna(mode.iloc[0] if len(mode) else 'Missing')
-    return output
 
 
 @router.get("/{project_id}/download-dataset")
@@ -444,25 +357,19 @@ def download_dataset(project_id: str, imputation_method: str = "Median", current
     try:
         # Load raw dataset from S3/MinIO
         file_bytes = storage.download_file(project.dataset_path)
-        df = pd.read_csv(io.BytesIO(file_bytes))
-        
-        # Apply imputation method
-        modified_df = apply_imputation(df.drop(columns=[project.target_variable]), imputation_method)
-        modified_df[project.target_variable] = df[project.target_variable]
-        
-        # Export to CSV bytes
-        out_buf = io.StringIO()
-        modified_df.to_csv(out_buf, index=False)
-        csv_bytes = out_buf.getvalue().encode("utf-8")
-        
+        _, exported, _ = run_operation('impute', {'target': project.target_variable, 'method': imputation_method}, {'dataset.csv': file_bytes}, with_audit=True)
+        csv_bytes = exported['dataset.csv']
+
         filename = f"{project_id}_imputed_{imputation_method.lower()}.csv"
         return StreamingResponse(
             io.BytesIO(csv_bytes),
             media_type="text/csv",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
-    except HTTPException:
+    except (HTTPException, SandboxError):
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process and download dataset: {e}")
 
@@ -483,12 +390,9 @@ def transform_feature(project_id: str, payload: TransformFeaturePayload, current
         
     if db.query(TrainingJob).filter(TrainingJob.project_id == project_id, TrainingJob.status.in_(['queued', 'running'])).first():
         raise HTTPException(status_code=409, detail='Wait for training to finish before changing transformations')
-    from services.preprocessing import CHOICES, transformed_preview
-    import pandas as pd
-    import numpy as np
-    df = pd.read_csv(io.BytesIO(storage.download_file(project.dataset_path)))
+    from services.preprocessing import CHOICES
     feature = payload.feature_name
-    if feature == project.target_variable or feature not in df.columns:
+    if feature == project.target_variable:
         raise HTTPException(status_code=400, detail='Choose a predictor column, not the target')
     records = db.query(DecisionMemory).filter(DecisionMemory.project_id == project_id).all()
     dec = next((d for d in records if d.feature_name == feature), None)
@@ -498,21 +402,10 @@ def transform_feature(project_id: str, payload: TransformFeaturePayload, current
     choices = {d.feature_name: (d.user_choice if d.override_active else d.decision) for d in records}
     choices[feature] = choice
     try:
-        preview = transformed_preview(df, project.target_variable, choices)
+        comparison, exported, _ = run_operation('transform', {'feature': feature, 'target': project.target_variable, 'choices': choices}, {'dataset.csv': storage.download_file(project.dataset_path)}, with_audit=True)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
-    def numeric(series):
-        return pd.to_numeric(series, errors='coerce') if pd.api.types.is_numeric_dtype(series) else pd.Series(pd.factorize(series)[0], index=series.index)
-    target = numeric(df[project.target_variable])
-    before = numeric(df[feature]).corr(target)
-    after_columns = [c for c in preview.columns if c == feature or c.startswith(feature + '_')]
-    after_values = [abs(numeric(preview[c]).corr(target)) for c in after_columns]
-    before = float(abs(before)) if pd.notna(before) else 0.0
-    after = max((float(c) for c in after_values if pd.notna(c)), default=0.0)
-    missing_before = int(df[feature].isna().sum())
-    missing_after = int(preview[after_columns].isna().sum().sum())
-    comparison = {'before_corr': round(before, 4), 'after_corr': round(after, 4), 'improvement': round(after-before, 4), 'before_missing': missing_before, 'after_missing': missing_after, 'better': bool(after-before > .001 or missing_after < missing_before)}
-    storage.upload_dataset(f'{project_id}_transformed.csv', preview.to_csv(index=False).encode())
+    storage.upload_dataset(f'{project_id}_transformed.csv', exported['dataset.csv'])
     dec.override_active = payload.transformation != 'recommended'
     dec.user_choice = choice if dec.override_active else None
     dec.comparison_metrics_json = comparison
@@ -552,7 +445,7 @@ def get_presigned_download_transformed(project_id: str, current_user: User = Dep
             
         signed_url = storage.generate_presigned_download_url(path)
         return {"url": signed_url}
-    except HTTPException:
+    except (HTTPException, SandboxError):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate presigned download URL: {e}")

@@ -68,3 +68,13 @@ The `gateway/` folder and `docker-compose.yml` are for the local Docker stack; t
 The API and worker initialize/upgrade the schema on startup. Deploy one API and one worker initially. Password recovery requires an administrator workflow; an unauthenticated email request does not reset a password. Gemini responses use local project summaries when its API key is absent.
 
 Official references: [Render monorepo support](https://render.com/docs/monorepo-support), [Render background workers](https://render.com/docs/background-workers), [Railway monorepos](https://docs.railway.com/guides/deploying-a-monorepo), [Railway start commands](https://docs.railway.com/deployments/start-command).
+
+## Isolated execution prerequisite
+
+The API and worker now require a Docker-capable execution host. Build `backend/Dockerfile.sandbox` before accepting uploads or training jobs; see [SANDBOXING.md](SANDBOXING.md) for commands, temporary execution credentials, resource limits and the Docker Compose overlay.
+
+The Render/Railway service settings above configure the control plane, but a normal platform service without access to a Docker engine cannot run these execution sandboxes. Computation fails closed in that environment. A Docker image containing the API is not itself a Docker execution host. For this isolation model, run the trusted API/worker brokers on a private Docker-capable host and keep PostgreSQL/S3 external.
+
+Dataset uploads now require private ClamAV and quarantine storage configuration before rollout. See [UPLOAD_SECURITY.md](UPLOAD_SECURITY.md). Scanner outages block new dataset approval.
+
+For an existing worker configured as a Render Web Service, see [WORKER_HOSTING.md](WORKER_HOSTING.md) for the HTTP supervisor and the remaining Docker-host requirement.

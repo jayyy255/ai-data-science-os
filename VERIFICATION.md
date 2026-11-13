@@ -103,3 +103,41 @@ See [PUBLIC_DATASET_RESULTS.md](PUBLIC_DATASET_RESULTS.md) for the three downloa
 - Browser audited 14 pages at 320, 390, 768, 1024 and 1440px (70 combinations); no body/header/main overflow after charts settled. Checked phone chat context, drawer keyboard focus and dark overview separately. Sign-in was exercised at 390px.
 - Frontend lint and production build passed; the existing bundle-size advisory remains.
 - Evidence: tmp/responsive-audit.json, tmp/responsive-mobile.png, tmp/responsive-desktop.png.
+
+## Sandboxed execution and assistant evidence — 2026-10-31
+
+- Dataset/model computation now runs in disposable, non-root Docker containers: parsing/profile, imputation, feature transforms, HPO/training, model deserialization, prediction, SHAP, champion inspection and drift. No raw model pickle is loaded by the API/queue broker.
+- Jobs have a fresh private temporary filesystem, single-invocation expiring HMAC credential, no network or host mounts, read-only image root, dropped capabilities, no-new-privileges, CPU/memory/PID/file/output limits and wall-clock timeout cleanup. Cloud/database/session credentials stay in the broker. Execution fails closed when Docker/image access is unavailable.
+- Verified six security tests with real containers where applicable: non-root/no-capabilities, blocked network, read-only root, no leaked application environment, temporary-filesystem separation, timeout/container cleanup, unique credentials, expiry, cross-job binding, invalid signatures and unavailable-backend rejection.
+- All ten existing workflow regression tests passed through real sandboxes (129 seconds). Three additional assistant checks passed: project-scoped log context/redaction/cache changes, guarded Gemini prompt, and provider fallback.
+- The full live HTTP API/queue-worker run passed all 95 E2E checks with sandboxed computation, including classification/regression, executable artifacts, predictions, SHAP, feature transforms, imputation, champion changes, drift, failed jobs, retraining, restart persistence and account isolation.
+- Frontend lint/build and the sandbox Docker Compose overlay validation passed. Local consumer-side unpickling in the artifact compatibility tests reported sklearn version warnings (sandbox 1.9.1 vs host 1.7.1); runtime inference itself stays inside the compatible sandbox image. Preserve image compatibility or retrain models after dependency upgrades.
+- Assistant context includes candidate validation/test metrics, HPO trials, training logs, the latest selection event even beyond the recent-timeline window, and optional manual selection reasons. No new live Gemini request was needed: prompts/context were verified with a mocked provider, avoiding transmission of existing project records.
+- Deployment prerequisite and credential semantics are documented in SANDBOXING.md. A normal Render service without a Docker execution engine cannot execute these jobs; no platform sandbox deployment was performed.
+
+## 2026-11-02 upload approval verification
+
+Implemented private quarantine, single-use owned upload reservations, signed POST size/type/key restrictions, default ClamAV scanning with production fail-closed behavior, isolated CSV profiling before promotion, approved-byte SHA256 audit, and cleanup/lifecycle configuration. Frontend now uses the quarantine reservation flow.
+
+- 13 workflow tests passed with real Docker computation, including quarantine upload, ownership, promotion and replay rejection. Workflow scanner mode is explicitly the local-only development stub.
+- All 10 upload security tests passed in a networked test container, including real ClamAV clean/EICAR scans and real MinIO policy enforcement (oversized, modified key, modified content type rejected). The temporary test bucket was removed.
+- Frontend lint and production build passed; existing bundle-size warning remains. Python compilation and compose configuration validation passed.
+- Scanner signature update succeeded. Corrected Windows config line endings and switched health to the configured local socket.
+- Hosted S3 policies/CORS/lifecycle and a hosted scanner are not provisioned by these code changes. See UPLOAD_SECURITY.md. No new live Gemini request or remote Render deployment was performed. Worker port work remains deferred.
+
+## 2026-11-02 worker web-port verification
+
+Added optional python worker/web.py supervisor binding 0.0.0.0:$PORT. Five HTTP/lifecycle tests passed. A real worker in a disposable, network-isolated container exposed /health with HTTP 200 and wrote its database heartbeat. /ready correctly returned 503 without Docker access. Shutdown stopped the supervisor/worker and the test container was removed. This addresses port detection, not Render Docker-engine availability or free-service idle suspension. See WORKER_HOSTING.md. Not deployed or pushed.
+
+## Temporary malware-scanner bypass
+
+Owner requested approval without ClamAV until a scanner is provisioned. Added explicit AIDSO_MALWARE_SCANNER=bypass, selected in the Render template. Approval audit and EDA metadata label scanning skipped; CSV validation, file limits, ownership, quarantine and Docker isolation stay enforced. Nine upload-security tests passed, with two external-service integrations skipped in this run. The new production-mode test confirms no scanner connection, preserved CSV rejection, and honest audit metadata. Default clamav mode still fails closed. No live service variables or existing uploads were changed.
+
+## 2026-11-02 local dry run with real AWS S3
+
+- Full local API/worker end-to-end run passed 107 checks using real AWS S3, production storage configuration, an isolated local SQLite database, real Docker computation and the owner-requested scanner bypass. Covered actual signed POST uploads, browser CORS preflight, tampered-form rejection, ownership/replay checks, classification/regression, four models and 20 HPO trials, retraining, downloaded pipelines, signed model downloads, explanations, drift reports, failure recovery, persistence and logout revocation.
+- Browser exercised synthetic CSV upload directly to S3, EDA, saved feature override, training, HPO table, model registry, prediction and row-level SHAP. No browser console errors recorded. Live Gemini chat successfully used training logs and explained validation-based model selection after the test API was pointed to backend/.env's key (a different inherited environment key was rejected). Production must supply the correct Gemini key in its own environment.
+- Additional live checks downloaded raw, transformed and imputed CSVs through signed S3 URLs; native worker /health and /ready returned 200 with the local Docker engine/image.
+- Six real Docker/protocol security tests, nine upload-security tests and five worker HTTP/supervisor tests passed. The separate external ClamAV/MinIO integration tests were skipped in this bypass-mode run. Frontend lint/build passed, with the existing large-bundle warning.
+- Temporary browser/API/worker processes stopped. All 27 recorded S3 test object keys were verified absent after cleanup; existing application objects were not selected. Evidence is in ignored tmp/e2e-results-s3.json and tmp/s3-browser-dry-run-proof.png.
+- This verifies local execution with real S3, not a hosted Render deployment or hosted PostgreSQL integration. Malware scanning was intentionally skipped.

@@ -95,7 +95,10 @@ def main():
                         "best_model": results["best_model"],
                         "best_metric": results["best_f1"] if results["best_f1"] is not None else results["best_mse"],
                         "trials_run": results["trials_run"],
-                        "hpo_trials": results["hpo_trials"]
+                        "hpo_trials": results["hpo_trials"],
+                        "execution_log": results["execution_log"],
+                        "model_selection": results["model_selection"],
+                        "sandbox": results["sandbox"]
                     }
                     
                     # Update project status
@@ -120,7 +123,7 @@ def main():
                     db_save.add(TimelineEvent(
                         project_id=project_id,
                         title="Model Training Completed",
-                        description=f"Best model chosen: {results['best_model']} (Metric: {results.get('best_f1') if results.get('best_f1') is not None else results.get('best_mse')})",
+                        description=results["model_selection"]["reason"],
                         event_type="success"
                     ))
                     db_save.add(TimelineEvent(
@@ -138,12 +141,16 @@ def main():
                     print(f"Training execution failed for job {job_id}: {train_err}")
                     db_fail = db_session_maker()
                     j = db_fail.query(TrainingJob).filter(TrainingJob.id == job_id).first()
-                    j.metrics_json = {'error': str(train_err)}
+                    from services.sandbox import redact
+                    j.metrics_json = {**(j.metrics_json or {}), 'error': redact(str(train_err))[:1000]}
                     j.status = 'failed'
                     j.completed_at = datetime.utcnow()
                     
                     p = db_fail.query(Project).filter(Project.id == project_id).first()
                     p.status = "Failed"
+                    failed_card = db_fail.query(KnowledgeCard).filter_by(project_id=project_id).first()
+                    if failed_card:
+                        failed_card.status = 'Failed'
                     
                     db_fail.add(TimelineEvent(
                         project_id=project_id,

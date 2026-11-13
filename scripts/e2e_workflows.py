@@ -4,10 +4,12 @@ Creates disposable SQLite/artifact storage, starts HTTP API and worker processes
 and writes results to tmp/e2e-results.json. Never uses the development database.
 """
 import io
+from contextlib import closing
 import json
 import os
 import pickle
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -30,13 +32,31 @@ def main():
     output.mkdir(exist_ok=True)
     started = time.monotonic()
     succeeded = False
+    s3_mode = os.getenv('AIDSO_E2E_STORAGE') == 's3'
+    s3 = None
+    cleanup_count = 0
     with tempfile.TemporaryDirectory(prefix='aidso-e2e-', dir=output) as scratch:
         scratch = Path(scratch)
         env = os.environ.copy()
         env.update(DATABASE_URL='sqlite:///' + (scratch / 'database.db').as_posix(),
-                   LOCAL_STORAGE_DIR=str(scratch / 'artifacts'), ENVIRONMENT='local', AIDSO_LOAD_ENV_FILE='0')
+                   LOCAL_STORAGE_DIR=str(scratch / 'artifacts'), ENVIRONMENT='local', AIDSO_LOAD_ENV_FILE='0',
+                   AIDSO_MALWARE_SCANNER='bypass')
         for name in ['MINIO_ENDPOINT', 'REDIS_URL', 'GEMINI_API_KEY', 'DATABASE_URI']:
             env.pop(name, None)
+        if s3_mode:
+            from dotenv import dotenv_values
+            import boto3
+            from botocore.config import Config
+            config = {**dotenv_values(ROOT / '.env'), **dotenv_values(BACKEND / '.env'), **os.environ}
+            for key in ('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_REGION', 'S3_BUCKET'):
+                if config.get(key):
+                    env[key] = config[key]
+            if not env.get('S3_BUCKET'):
+                raise RuntimeError('S3_BUCKET must be configured')
+            env['ENVIRONMENT'] = 'production'
+            s3 = boto3.client('s3', aws_access_key_id=env.get('AWS_ACCESS_KEY_ID'), aws_secret_access_key=env.get('AWS_SECRET_ACCESS_KEY'),
+                aws_session_token=env.get('AWS_SESSION_TOKEN'), region_name=env.get('AWS_REGION', 'us-east-1'),
+                config=Config(connect_timeout=10, read_timeout=30, retries={'max_attempts': 1}))
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
@@ -63,6 +83,25 @@ def main():
             return response
 
         def create(client, frame, name, task='auto', expected=200):
+            if expected == 200 and task == 'classification':
+                upload = request(client, 'POST', '/projects/presigned-upload-url', json={'filename': 'fixture.csv'}).json()
+                if upload['url'].startswith('https://'):
+                    cors = s3.get_bucket_cors(Bucket=env['S3_BUCKET'])['CORSRules']
+                    origin = next(origin for rule in cors for origin in rule['AllowedOrigins'] if origin.startswith('https://'))
+                    preflight = httpx.options(upload['url'], headers={'Origin': origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type'}, timeout=30)
+                    check(preflight.status_code == 200 and preflight.headers.get('access-control-allow-origin') == origin, 'S3 browser upload CORS preflight succeeds')
+                    uploaded = httpx.post(upload['url'], data=upload['fields'], files={'file': ('fixture.csv', frame.to_csv(index=False).encode(), 'text/csv')}, timeout=60)
+                    check(uploaded.status_code in (200, 204), name + ': real S3 signed POST succeeds')
+                    altered = httpx.post(upload['url'], data={**upload['fields'], 'Content-Type': 'application/octet-stream'}, files={'file': ('fixture.csv', b'x', 'text/csv')}, timeout=30)
+                    check(altered.status_code == 403, name + ': S3 rejects altered signed upload fields')
+                else:
+                    request(client, 'POST', upload['url'].removeprefix('/api'),
+                        files={'file': ('fixture.csv', frame.to_csv(index=False).encode(), 'text/csv')})
+                request(other, 'POST', '/projects', 400, data={'name': name, 'target_variable': 'target', 'dataset_path': upload['s3_path']})
+                response = request(client, 'POST', '/projects', data={'name': name, 'target_variable': 'target', 'problem_type': task, 'dataset_path': upload['s3_path']})
+                request(client, 'POST', '/projects', 400, data={'name': name, 'target_variable': 'target', 'dataset_path': upload['s3_path']})
+                check(True, name + ': quarantine upload is owned, single-use and promoted')
+                return response.json()['project']['id']
             response = request(client, 'POST', '/projects', expected,
                                data={'name': name, 'target_variable': 'target', 'description': 'E2E fixture', 'problem_type': task},
                                files={'file': ('fixture.csv', frame.to_csv(index=False).encode(), 'text/csv')})
@@ -98,6 +137,8 @@ def main():
                     response = request(client, 'POST', '/auth/signup', json={
                         'full_name': 'E2E Test', 'username': username,
                         'email': username + '@example.test', 'password': password})
+                    if s3_mode:
+                        client.headers['Authorization'] = 'Bearer ' + response.json()['refreshToken']
                     check(bool(response.json()['refreshToken']), f'{username}: signup establishes a session')
                 request(owner, 'POST', '/auth/signup', 400, json={
                     'full_name': 'E2E', 'username': 'e2e_owner', 'email': 'duplicate@example.test', 'password': password})
@@ -126,6 +167,9 @@ def main():
                     details = request(owner, 'GET', path).json()
                     check(details['project']['problem_type'] == task, f'{task}: explicit task and profile persisted')
                     profile = details['project']['eda_profile_json']
+                    if s3_mode:
+                        check(details['project']['dataset_path'].startswith('s3://' + env['S3_BUCKET'] + '/datasets/'), f'{task}: approved dataset uses real S3')
+                    check(profile['upload_security']['malware_scan'] == 'skipped', f'{task}: temporary scanner bypass is recorded honestly')
                     check(profile['datetime_count'] == 1 and profile['text_count'] == 1, f'{task}: date and text columns counted from actual data')
                     request(owner, 'POST', path + '/predict', 409, json={'rows': [{'age': 25}]})
                     request(other, 'GET', path, 404)
@@ -158,7 +202,7 @@ def main():
                         pipeline = pickle.loads(data)
                         check(len(pipeline.predict(sample)) == 3, f'{task}: downloaded {name} accepts raw rows and unknown categories')
                         signed = request(owner, 'GET', path + '/presigned-download-model', params={'model_name': name}).json()['url']
-                        check(owner.get(f'http://127.0.0.1:{port}' + signed).content == data, f'{task}: signed {name} download returns same artifact')
+                        check((httpx.get(signed, timeout=30) if signed.startswith('https://') else owner.get(f'http://127.0.0.1:{port}' + signed)).content == data, f'{task}: signed {name} download returns same artifact')
                     prediction = request(owner, 'POST', path + '/predict', json={'rows': rows}).json()
                     check(len(prediction['predictions']) == 3, f'{task}: inference uses saved pipeline')
                     if task == 'classification':
@@ -211,6 +255,8 @@ def main():
                 check(len(request(owner, 'GET', '/projects').json()) == 3, 'Restart preserves account session and all project records')
                 login = request(owner, 'POST', '/auth/login', json={'identity': 'e2e_owner', 'password': password}).json()
                 token = login['refreshToken']
+                if s3_mode:
+                    owner.headers['Authorization'] = 'Bearer ' + token
                 request(owner, 'POST', '/auth/logout', json={'refresh_token': token})
                 request(owner, 'GET', '/projects', 401)
                 request(owner, 'GET', '/projects', 401, headers={'Authorization': 'Bearer ' + token})
@@ -228,8 +274,36 @@ def main():
                     try: process.wait(timeout=15)
                     except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=10)
             for log in logs: log.close()
-            report = {'status': 'passed' if succeeded else 'failed', 'passed_checks': len(results), 'checks': results, 'seconds': round(time.monotonic()-started, 2)}
-            (output / 'e2e-results.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+            if s3_mode:
+                # Only paths/IDs issued into this disposable database are eligible for cleanup.
+                try:
+                    keys = set()
+                    bucket = env['S3_BUCKET']
+                    prefixes = []
+                    with closing(sqlite3.connect(scratch / 'database.db')) as db:
+                        for path, approved in db.execute('select path, approved_path from dataset_uploads'):
+                            for value in (path, approved):
+                                if value and value.startswith(f's3://{bucket}/'):
+                                    keys.add(value[len(f's3://{bucket}/'):])
+                            if approved:
+                                base_name = approved.rsplit('/', 1)[-1].removesuffix('.csv')
+                                prefixes.append('datasets/imputed_' + base_name + '_')
+                        for (project_id,) in db.execute('select id from projects'):
+                            prefixes.extend([f'models/{project_id}/', f'reports/{project_id}_', f'datasets/{project_id}_'])
+                    for prefix in prefixes:
+                        for page in s3.get_paginator('list_objects_v2').paginate(Bucket=bucket, Prefix=prefix):
+                            keys.update(item['Key'] for item in page.get('Contents', []))
+                    ledger = output / 's3-dry-run-cleanup.json'
+                    ledger.write_text(json.dumps({'bucket': bucket, 'keys': sorted(keys)}, indent=2))
+                    for key in keys:
+                        s3.delete_object(Bucket=bucket, Key=key)
+                        cleanup_count += 1
+                    print(f'S3 cleanup: removed {cleanup_count} disposable test object keys.', flush=True)
+                except Exception as cleanup_error:
+                    succeeded = False
+                    print('S3 cleanup failed: ' + type(cleanup_error).__name__, flush=True)
+            report = {'storage': 'AWS S3' if s3_mode else 'local filesystem', 's3_cleanup_count': cleanup_count, 'status': 'passed' if succeeded else 'failed', 'passed_checks': len(results), 'checks': results, 'seconds': round(time.monotonic()-started, 2)}
+            (output / ('e2e-results-s3.json' if s3_mode else 'e2e-results.json')).write_text(json.dumps(report, indent=2), encoding='utf-8')
     print(f'Completed {len(results)} E2E checks.', flush=True)
 
 

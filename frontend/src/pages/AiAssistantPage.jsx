@@ -118,7 +118,7 @@ export default function AiAssistantPage() {
           </div>
           <div>
             <h3 className="text-sm font-semibold text-zinc-200">Chat Assistant</h3>
-            <p className="text-[10px] font-mono text-zinc-500">Context from project records and recent timeline events</p>
+            <p className="text-[10px] font-mono text-zinc-500">Context from project records, training logs, HPO trials, and selection reasons</p>
           </div>
         </div>
 

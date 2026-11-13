@@ -36,6 +36,15 @@ with engine.connect() as conn:
 
 app = FastAPI(title="AIDSO Backend API", version="1.0.0")
 
+from services.security import ScannerUnavailable
+from services.sandbox import SandboxError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(ScannerUnavailable)
+@app.exception_handler(SandboxError)
+async def sandbox_unavailable(request, error):
+    return JSONResponse(status_code=503, content={'detail': str(error)})
+
 @app.get('/api/health')
 def health():
     return {"status": "ok"}
@@ -69,6 +78,10 @@ def system_status(user=Depends(get_current_user), db=Depends(get_db)):
         'gemini': 'Configured' if GeminiService().client_enabled else 'Not configured (local summaries available)',
         'worker_last_seen': heartbeat.timestamp.isoformat() + 'Z' if heartbeat else None,
         'queue': 'Database task queue',
+        'upload_approval': 'Private quarantine and isolated CSV validation; malware scanning temporarily skipped' if os.getenv('AIDSO_MALWARE_SCANNER', 'clamav') == 'bypass' else 'Private quarantine, malware checks and isolated CSV validation required',
+        'malware_scanner_mode': os.getenv('AIDSO_MALWARE_SCANNER', 'clamav'),
+        'execution_backend': 'Docker sandbox (required; no unsandboxed fallback)',
+        'sandbox_image': os.getenv('AIDSO_SANDBOX_IMAGE', 'aidso-sandbox:local'),
     }
 
 if __name__ == '__main__':

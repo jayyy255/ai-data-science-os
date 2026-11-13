@@ -33,11 +33,6 @@ class StorageProvider(ABC):
         pass
 
     @abstractmethod
-    def generate_presigned_upload_url(self, filename: str) -> dict:
-        """Generates a presigned URL to let clients upload files directly to storage."""
-        pass
-
-    @abstractmethod
     def generate_presigned_download_url(self, path: str) -> str:
         """Generates a presigned URL to let clients download files directly from storage."""
         pass

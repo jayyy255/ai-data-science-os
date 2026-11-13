@@ -47,7 +47,7 @@ export default function CreateProjectPage() {
         </Link>
         <div>
           <h1 className="text-2xl font-display font-bold text-white tracking-tight">Create New AI Project</h1>
-          <p className="text-xs text-zinc-400">Upload a dataset, choose a target, and create a modeling workspace.</p>
+          <p className="text-xs text-zinc-400">Upload a dataset, choose a target, and create a modeling workspace. Files are checked before use.</p>
         </div>
       </div>
 
@@ -182,7 +182,7 @@ export default function CreateProjectPage() {
                   : 'bg-brand-primary hover:bg-brand-primary-hover border border-transparent shadow-brand-primary/25'}
               `}
             >
-              Initialize Project
+              {uploading ? 'Uploading and checking...' : 'Initialize Project'}
             </button>
           </div>
         </div>
